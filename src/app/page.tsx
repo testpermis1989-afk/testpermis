@@ -91,6 +91,40 @@ const LoginScreen = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
 
 // ===== ÉCRAN DES CATÉGORIES =====
 const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: UserRole; onSelectCategory: (cat: Category) => void; onLogout: () => void }) => {
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+
+  // Précharger les images des catégories
+  useEffect(() => {
+    let loadedCount = 0;
+    const totalImages = categoriesData.length;
+    
+    const checkAllLoaded = () => {
+      loadedCount++;
+      if (loadedCount === totalImages) {
+        setImagesLoaded(true);
+      }
+    };
+
+    categoriesData.forEach((cat) => {
+      const img = new window.Image();
+      img.onload = checkAllLoaded;
+      img.onerror = checkAllLoaded;
+      img.src = cat.image;
+    });
+  }, []);
+
+  // Afficher un chargement léger
+  if (!imagesLoaded) {
+    return (
+      <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-gray-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-gray-600 text-sm">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 relative overflow-hidden">
       <RoadSignsBackground />
@@ -112,8 +146,8 @@ const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: 
             {categoriesData.map((cat) => (
               <button key={cat.id} onClick={() => onSelectCategory(cat)} className="bg-white/90 rounded-xl p-4 shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] group border-2 border-gray-300 flex flex-col items-center">
                 <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg group-hover:scale-110 transition-all mb-2" style={{ backgroundColor: cat.color }}>{cat.id}</div>
-                <div className="w-full h-28 relative rounded overflow-hidden bg-gray-100 mb-2">
-                  <Image src={cat.image} alt={cat.name} fill className="object-contain p-2" />
+                <div className="w-full h-36 relative mb-2 transition-transform duration-200 group-hover:scale-105">
+                  <Image src={cat.image} alt={cat.name} fill className="object-contain p-2 transition-all duration-200 group-hover:scale-110 group-hover:brightness-110 brightness-105" />
                 </div>
                 <p className="text-lg font-bold text-gray-800">{cat.name}</p>
                 <p className="text-gray-600 text-sm" dir="rtl">{cat.nameAr}</p>
@@ -181,29 +215,56 @@ const exitFullscreen = () => {
   }
 };
 
-// ===== ÉCRAN MOT DE PASSE (STYLE EXACT IMAGE) =====
+// ===== ÉCRAN MOT DE PASSE (NOUVEAU DESIGN) =====
 const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Category; series: number; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
-  // Vérifier l'état du plein écran
+  // Précharger l'image de fond
   useEffect(() => {
-    const checkFullscreen = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+    const img = new window.Image();
+    img.onload = () => setImageLoaded(true);
+    img.onerror = () => setImageLoaded(true);
+    img.src = '/images/pin-screen-bg.jpg';
+    
+    // Précharger aussi les boutons
+    new window.Image().src = '/images/btn-fermer-new.png';
+    new window.Image().src = '/images/btn-corriger.png';
+    new window.Image().src = '/images/chiffre-0.png';
+  }, []);
+
+  // Activer le plein écran et rotation horizontale automatiquement au chargement
+  useEffect(() => {
+    const enterFullscreenAndRotate = async () => {
+      try {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if ((elem as unknown as { webkitRequestFullscreen: () => void }).webkitRequestFullscreen) {
+          (elem as unknown as { webkitRequestFullscreen: () => void }).webkitRequestFullscreen();
+        } else if ((elem as unknown as { msRequestFullscreen: () => void }).msRequestFullscreen) {
+          (elem as unknown as { msRequestFullscreen: () => void }).msRequestFullscreen();
+        }
+        
+        if (screen.orientation && screen.orientation.lock) {
+          try {
+            await screen.orientation.lock('landscape');
+          } catch {
+            console.log('Orientation lock not supported');
+          }
+        }
+      } catch {
+        console.log('Fullscreen or orientation lock not available');
+      }
     };
-    document.addEventListener('fullscreenchange', checkFullscreen);
-    checkFullscreen();
-    return () => document.removeEventListener('fullscreenchange', checkFullscreen);
+    
+    enterFullscreenAndRotate();
   }, []);
 
   // Redirection automatique quand 4 chiffres sont saisis
   useEffect(() => {
     if (code.length === 4) {
       const timer = setTimeout(() => {
-        // Entrer en plein écran avant de continuer
-        if (!document.fullscreenElement) {
-          enterFullscreen();
-        }
         onSuccess();
       }, 300);
       return () => clearTimeout(timer);
@@ -211,170 +272,119 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
+  // Fonction pour jouer un son de clic
+  const playClickSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 600;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.1);
+    } catch {
+      // Audio not supported
+    }
+  };
+
   const handleKeyPress = (num: string) => {
     if (code.length < 4) {
+      playClickSound();
       setCode(prev => prev + num);
     }
   };
 
   const handleCorrect = () => {
+    playClickSound();
     setCode("");
   };
 
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      exitFullscreen();
-    } else {
-      enterFullscreen();
-    }
-  };
+  // Afficher un écran de chargement pendant le chargement de l'image
+  if (!imageLoaded) {
+    return (
+      <div className="fixed inset-0 w-screen h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-2xl animate-pulse">Chargement...</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-2 md:p-4 relative" style={{ backgroundColor: '#8B8B9B' }}>
-      {/* Bouton Plein Écran */}
+    <div 
+      className="fixed inset-0 w-screen h-screen"
+      style={{ 
+        backgroundImage: 'url(/images/pin-screen-bg.jpg)',
+        backgroundSize: '100% 100%',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    >
+      {/* Chiffre 0 */}
       <button
-        onClick={toggleFullscreen}
-        className="absolute top-4 right-4 z-50 px-4 py-2 rounded-lg font-bold text-white transition-all hover:opacity-90 flex items-center gap-2"
-        style={{ backgroundColor: isFullscreen ? '#4CAF50' : '#2196F3' }}
+        onClick={() => handleKeyPress('0')}
+        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        style={{ 
+          top: '37%', 
+          left: '69%', 
+          width: '22%',
+          height: '35%'
+        }}
       >
-        {isFullscreen ? (
-          <>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Quitter
-          </>
-        ) : (
-          <>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-            </svg>
-            Plein écran
-          </>
-        )}
+        <Image 
+          src="/images/chiffre-0.png" 
+          alt="0" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
       </button>
 
-      {/* Container principal avec bordure 3D */}
-      <div className="w-full max-w-4xl rounded-lg overflow-hidden shadow-2xl" style={{ backgroundColor: '#F0F0F0', border: '4px solid #7A7A8A' }}>
-        <div className="flex flex-col md:flex-row">
-          
-          {/* PARTIE GAUCHE - Avatar et Infos */}
-          <div className="w-full md:w-1/2 p-4 md:p-6" style={{ backgroundColor: '#E8E8E8' }}>
-            {/* Avatar */}
-            <div className="w-28 h-28 md:w-36 md:h-36 mx-auto mb-4 md:mb-6 rounded-lg overflow-hidden shadow-lg border-4 border-white bg-gray-200 flex items-center justify-center">
-              <svg className="w-16 h-16 md:w-20 md:h-20 text-gray-400" fill="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M12 14c-4 0-8 2-8 4v2h16v-2c0-2-4-4-8-4z" />
-              </svg>
-            </div>
+      {/* Bouton Corriger - superposé sur l'image de fond */}
+      <button
+        onClick={handleCorrect}
+        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        style={{ 
+          right: '13%', 
+          bottom: '18%', 
+          width: 'clamp(100px, 15vw, 220px)',
+          height: 'clamp(60px, 10vh, 120px)'
+        }}
+      >
+        <Image 
+          src="/images/btn-corriger.png" 
+          alt="Corriger" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
 
-            {/* N°CIN */}
-            <div className="mb-3 rounded overflow-hidden shadow flex">
-              <div className="px-3 py-2 bg-white text-gray-700 font-medium text-sm border-r border-gray-300">N°CIN</div>
-              <div className="flex-1 px-3 py-2 text-white font-bold text-center" style={{ backgroundColor: '#3498db' }}>________</div>
-              <div className="px-3 py-2 bg-white text-gray-600 text-xs">بصمة اليد</div>
-            </div>
-
-            {/* Type de permis */}
-            <div className="mb-3 rounded overflow-hidden shadow flex">
-              <div className="px-3 py-2 bg-white text-gray-700 font-medium text-sm border-r border-gray-300">Type de</div>
-              <div className="flex-1 px-3 py-2 text-white font-bold text-center" style={{ backgroundColor: '#3498db' }}>Catégorie {category.id}</div>
-              <div className="px-3 py-2 bg-white text-gray-600 text-xs">فئة السيارة</div>
-            </div>
-
-            {/* Langue */}
-            <div className="mb-3 rounded overflow-hidden shadow flex">
-              <div className="px-3 py-2 bg-white text-gray-700 font-medium text-sm border-r border-gray-300">Langue</div>
-              <div className="flex-1 px-3 py-2 text-white font-bold text-center" style={{ backgroundColor: '#3498db' }}>Arabe</div>
-              <div className="px-3 py-2 bg-white text-gray-600 text-xs">اللغة</div>
-            </div>
-
-            {/* Série */}
-            <div className="mt-6 text-center">
-              <p className="text-gray-600 text-sm">Série: <span className="font-bold">{series}</span></p>
-            </div>
-          </div>
-
-          {/* PARTIE DROITE - Clavier */}
-          <div className="w-full md:w-1/2 p-4 md:p-6" style={{ backgroundColor: '#4B0082' }}>
-            {/* Titre */}
-            <div className="text-center mb-4">
-              <p className="text-white text-lg font-medium">Entrez votre mot de passe</p>
-              <p className="text-white/80 text-sm" dir="rtl">أدخل رقمك السري</p>
-            </div>
-
-            {/* Affichage du code (4 cases) */}
-            <div className="flex justify-center gap-3 mb-6">
-              {[0, 1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="w-12 h-12 rounded flex items-center justify-center text-2xl font-bold"
-                  style={{
-                    backgroundColor: i < code.length ? '#FFD700' : '#5A5A6A',
-                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)'
-                  }}
-                >
-                  {i < code.length ? '●' : ''}
-                </div>
-              ))}
-            </div>
-
-            {/* Clavier numérique */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
-                <button
-                  key={num}
-                  onClick={() => handleKeyPress(num)}
-                  className="h-14 rounded-lg text-gray-800 text-2xl font-bold transition-all active:scale-95"
-                  style={{
-                    backgroundColor: '#87CEEB',
-                    boxShadow: '0 3px 0 #5A9BBF, inset 0 1px 0 rgba(255,255,255,0.4)'
-                  }}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
-
-            {/* Bouton 0 */}
-            <button
-              onClick={() => handleKeyPress('0')}
-              className="w-full h-14 rounded-lg text-gray-800 text-2xl font-bold transition-all active:scale-95 mb-4"
-              style={{
-                backgroundColor: '#FFFFFF',
-                boxShadow: '0 3px 0 #CCCCCC, inset 0 1px 0 rgba(255,255,255,0.8)'
-              }}
-            >
-              0
-            </button>
-
-            {/* Boutons */}
-            <div className="flex gap-3">
-              <button
-                onClick={handleCorrect}
-                className="flex-1 py-3 rounded-lg font-bold transition-all"
-                style={{
-                  backgroundColor: '#E8E0F0',
-                  color: '#CC0000',
-                  boxShadow: '0 3px 0 #C8C0D0'
-                }}
-              >
-                Corriger<br/><span className="text-xs" dir="rtl">تصحيح</span>
-              </button>
-              <button
-                onClick={onBack}
-                className="flex-1 py-3 rounded-lg font-bold text-white transition-all"
-                style={{
-                  backgroundColor: '#CC0000',
-                  boxShadow: '0 3px 0 #8B0000'
-                }}
-              >
-                Fermer<br/><span className="text-xs" dir="rtl">إغلاق</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Bouton Fermer - superposé sur l'image de fond */}
+      <button
+        onClick={onBack}
+        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        style={{ 
+          right: '13%', 
+          bottom: '8%', 
+          width: 'clamp(100px, 15vw, 220px)',
+          height: 'clamp(60px, 10vh, 160px)'
+        }}
+      >
+        <Image 
+          src="/images/btn-fermer-new.png" 
+          alt="Fermer" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
     </div>
   );
 };
