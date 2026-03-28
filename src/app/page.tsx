@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 
 // Types
@@ -229,13 +229,13 @@ const exitFullscreen = () => {
 const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Category; series: number; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Précharger l'AudioContext au démarrage
   useEffect(() => {
     try {
       const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      setAudioContext(ctx);
+      audioContextRef.current = ctx;
     } catch {
       // Audio not supported
     }
@@ -319,23 +319,24 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
 
   // Fonction pour jouer un son de clic
   const playClickSound = () => {
-    if (!audioContext) return;
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
     
     try {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
       
       oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+      gainNode.connect(ctx.destination);
       
       oscillator.frequency.value = 600;
       oscillator.type = 'sine';
       
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
       
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.1);
+      oscillator.start(ctx.currentTime);
+      oscillator.stop(ctx.currentTime + 0.1);
     } catch {
       // Audio not supported
     }
