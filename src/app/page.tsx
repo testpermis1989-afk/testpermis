@@ -302,7 +302,6 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
   };
 
   const handleCorrect = () => {
-    playClickSound();
     setCode("");
   };
 
@@ -325,6 +324,30 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
         backgroundRepeat: 'no-repeat'
       }}
     >
+      {/* Zone d'affichage du code PIN - 4 cases */}
+      <div className="absolute flex gap-3" style={{ bottom: '30%', right: '12.5%' }}>
+        {[0, 1, 2, 3].map((index) => (
+          <div key={index} className="relative" style={{ width: '53px', height: '63px' }}>
+            {/* Image de fond avec la ligne rouge */}
+            <Image 
+              src="/images/chif-display.jpg" 
+              alt={`digit-${index}`}
+              fill
+              className="object-contain"
+              unoptimized
+            />
+            {/* Le chiffre entré */}
+            {code[index] && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '36px', fontWeight: 'bold', color: '#FF0000' }}>
+                  {code[index]}
+                </span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* Chiffre 1 */}
       <button
         onClick={() => handleKeyPress('1')}
@@ -528,7 +551,7 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       {/* Bouton Corriger - superposé sur l'image de fond */}
       <button
         onClick={handleCorrect}
-        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        className="absolute transition-transform duration-150 active:scale-90"
         style={{ 
           right: '13%', 
           bottom: '18%', 
@@ -548,7 +571,7 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       {/* Bouton Fermer - superposé sur l'image de fond */}
       <button
         onClick={onBack}
-        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        className="absolute transition-transform duration-150 active:scale-90"
         style={{ 
           right: '13%', 
           bottom: '8%', 
