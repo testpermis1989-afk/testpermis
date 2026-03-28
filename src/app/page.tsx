@@ -654,134 +654,68 @@ const CounterScreen = ({ category, series, onStart }: { category: Category; seri
 
 // ===== ÉCRAN DE TEST =====
 const TestScreen = ({ category, series, onFinish, onBack }: { category: Category; series: number; onFinish: () => void; onBack: () => void }) => {
-  const [currentQuestion, setCurrentQuestion] = useState(1);
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [timeLeft, setTimeLeft] = useState(30 * 60);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const totalQuestions = category.questionsPerSeries || 1;
+  const [imageLoaded, setImageLoaded] = useState(false);
 
-  // S'assurer qu'on est en plein écran
+  // Précharger l'image de fond
   useEffect(() => {
-    const checkFullscreen = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', checkFullscreen);
-    checkFullscreen();
-    
-    // Entrer en plein écran si pas déjà
-    if (!document.fullscreenElement) {
-      enterFullscreen();
-    }
-    
-    return () => document.removeEventListener('fullscreenchange', checkFullscreen);
+    const img = new window.Image();
+    img.onload = () => setImageLoaded(true);
+    img.onerror = () => setImageLoaded(true);
+    img.src = '/images/test-screen-bg.png';
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (seconds: number) => {
-    const safeSeconds = Math.max(0, seconds);
-    const mins = Math.floor(safeSeconds / 60);
-    const secs = safeSeconds % 60;
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  };
-  
-  const progressPercent = Math.max(0, Math.min(100, (currentQuestion / totalQuestions) * 100));
-
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      exitFullscreen();
-    } else {
-      enterFullscreen();
-    }
-  };
-
-  const handleQuit = () => {
-    if (document.fullscreenElement) {
-      exitFullscreen();
-    }
-    onBack();
-  };
+  // Afficher un écran de chargement pendant le chargement de l'image
+  if (!imageLoaded) {
+    return (
+      <div className="fixed inset-0 w-screen h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-2xl animate-pulse">Chargement...</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen w-full bg-gray-800 flex flex-col">
-      {/* Header */}
-      <div className="bg-gray-900 text-white px-4 py-2 flex justify-between items-center">
-        <button onClick={handleQuit} className="bg-red-600 hover:bg-red-700 px-4 py-1 rounded font-bold">✕ Quitter</button>
-        <div className="flex items-center gap-4">
-          <span className="font-bold">Cat {category.id} | Série {series}</span>
-          <span className="text-yellow-400 font-bold">⏱ {formatTime(timeLeft)}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={toggleFullscreen}
-            className={`px-3 py-1 rounded font-bold flex items-center gap-1 ${isFullscreen ? 'bg-green-600' : 'bg-blue-600'}`}
-          >
-            {isFullscreen ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Quitter FS
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                </svg>
-                Plein écran
-              </>
-            )}
-          </button>
-          <span className="bg-gray-700 px-3 py-1 rounded">{currentQuestion}/{totalQuestions}</span>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div className="h-2 bg-gray-700">
-        <div className="h-full transition-all" style={{ width: `${progressPercent}%`, backgroundColor: category.color }} />
-      </div>
-
-      {/* Contenu */}
-      <div className="flex-1 flex flex-col md:flex-row gap-4 p-4">
-        <div className="md:w-1/2 flex flex-col gap-4">
-          <div className="flex-1 bg-gray-900 rounded-lg flex items-center justify-center min-h-[200px]">
-            <div className="text-center">
-              <div className="text-8xl mb-2">🪧</div>
-              <p className="text-gray-400">Image de la question</p>
-            </div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4">
-            <p className="font-bold text-white text-center">Que signifie ce panneau ?</p>
-            <p className="text-gray-300 text-center text-sm" dir="rtl">ماذا يعني هذا اللوحة؟</p>
-          </div>
-        </div>
-
-        <div className="md:w-1/2 flex flex-col gap-4">
-          <div className="flex-1 grid grid-cols-2 gap-4">
-            {['A', 'B', 'C', 'D'].map((letter) => (
-              <button
-                key={letter}
-                onClick={() => setSelectedAnswer(letter)}
-                className={`p-4 rounded-lg border-2 transition-all flex items-center gap-3 ${selectedAnswer === letter ? 'bg-green-600 border-green-400 text-white' : 'bg-gray-100 border-gray-300 hover:border-green-400'}`}
-              >
-                <span className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${selectedAnswer === letter ? 'bg-white text-green-600' : 'text-white'}`} style={{ backgroundColor: selectedAnswer === letter ? undefined : category.color }}>{letter}</span>
-                <span className="font-medium">Réponse {letter}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex gap-4">
-            <button onClick={() => { setCurrentQuestion(Math.max(1, currentQuestion - 1)); setSelectedAnswer(null); }} disabled={currentQuestion === 1} className="flex-1 py-3 bg-gray-600 text-white rounded-lg font-bold disabled:opacity-50">← Précédent</button>
-            {currentQuestion < totalQuestions ? (
-              <button onClick={() => { setCurrentQuestion(currentQuestion + 1); setSelectedAnswer(null); }} disabled={!selectedAnswer} className="flex-1 py-3 text-white rounded-lg font-bold disabled:opacity-50" style={{ backgroundColor: selectedAnswer ? category.color : '#9ca3af' }}>Suivant →</button>
-            ) : (
-              <button onClick={onFinish} disabled={!selectedAnswer} className="flex-1 py-3 bg-green-600 text-white rounded-lg font-bold disabled:opacity-50 hover:bg-green-700">✓ Terminer</button>
-            )}
-          </div>
-        </div>
+    <div 
+      className="fixed inset-0 w-screen h-screen"
+      style={{ 
+        backgroundImage: 'url(/images/test-screen-bg.png)',
+        backgroundSize: '100% 100%',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    >
+      {/* Zone noire pour afficher l'image/vidéo de la question */}
+      <div 
+        className="absolute bg-black border-4 border-white"
+        style={{
+          top: '7%',
+          left: '3.5%',
+          width: '73%',
+          height: '77%'
+        }}
+      >
+        {/* Image de test pour voir le rendu */}
+        <Image 
+          src="/images/question-test.png"
+          alt="Question"
+          fill
+          className="object-contain"
+          unoptimized
+        />
+        
+        {/* Bouton Stop en haut à droite */}
+        <button
+          onClick={onBack}
+          className="absolute bg-red-600 hover:bg-red-700 text-white font-bold rounded-full flex items-center justify-center"
+          style={{
+            top: '2%',
+            right: '2%',
+            width: 'clamp(40px, 4vw, 60px)',
+            height: 'clamp(40px, 4vw, 60px)',
+            fontSize: 'clamp(12px, 1.5vw, 18px)'
+          }}
+        >
+          ⏹
+        </button>
       </div>
     </div>
   );
