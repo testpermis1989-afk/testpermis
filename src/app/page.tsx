@@ -387,9 +387,9 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       </div>
 
       {/* Zone d'affichage du code PIN - 4 cases */}
-      <div className="absolute flex" style={{ bottom: '30.5%', right: '13.5%', gap: 'clamp(0.3rem, 0.8vw, 0.8rem)' }}>
+      <div className="absolute flex" style={{ bottom: '29%', right: '13.5%', gap: '0.5vw' }}>
         {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="relative" style={{ width: 'clamp(30px, 3vw, 45px)', height: 'clamp(42px, 4.5vw, 62px)' }}>
+          <div key={index} className="relative" style={{ width: '3vw', height: '4.5vw' }}>
             {/* Image de fond avec la ligne rouge */}
             <Image
               src="/images/chif-display.jpg"
@@ -617,8 +617,8 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
         style={{ 
           right: '13%', 
           bottom: '18%', 
-          width: 'clamp(100px, 15vw, 220px)',
-          height: 'clamp(60px, 10vh, 120px)'
+          width: '15%',
+          height: '10%'
         }}
       >
         <Image 
@@ -635,10 +635,10 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
         onClick={onBack}
         className="absolute transition-transform duration-150 active:scale-90"
         style={{ 
-          right: '13%', 
+          right: '15%', 
           bottom: '8%', 
-          width: 'clamp(100px, 15vw, 220px)',
-          height: 'clamp(60px, 10vh, 160px)'
+          width: '10%',
+          height: '10%'
         }}
       >
         <Image 
