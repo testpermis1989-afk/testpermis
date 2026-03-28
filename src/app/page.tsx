@@ -390,26 +390,19 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
 };
 
 // ===== ÉCRAN COMPTEUR AVANT TEST =====
-const CounterScreen = ({ category, series, onStart, onCancel }: { category: Category; series: number; onStart: () => void; onCancel: () => void }) => {
+const CounterScreen = ({ category, series, onStart }: { category: Category; series: number; onStart: () => void }) => {
   const [countdown, setCountdown] = useState(5);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
-  // S'assurer qu'on est en plein écran
+  // Précharger l'image de fond
   useEffect(() => {
-    const checkFullscreen = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', checkFullscreen);
-    checkFullscreen();
-    
-    // Entrer en plein écran si pas déjà
-    if (!document.fullscreenElement) {
-      enterFullscreen();
-    }
-    
-    return () => document.removeEventListener('fullscreenchange', checkFullscreen);
+    const img = new window.Image();
+    img.onload = () => setImageLoaded(true);
+    img.onerror = () => setImageLoaded(true);
+    img.src = '/images/counter-bg.jpg';
   }, []);
 
+  // Compte à rebours automatique
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => {
@@ -421,97 +414,25 @@ const CounterScreen = ({ category, series, onStart, onCancel }: { category: Cate
     }
   }, [countdown, onStart]);
 
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      exitFullscreen();
-    } else {
-      enterFullscreen();
-    }
-  };
+  // Afficher un écran de chargement pendant le chargement de l'image
+  if (!imageLoaded) {
+    return (
+      <div className="fixed inset-0 w-screen h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-white text-2xl animate-pulse">Chargement...</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 relative" style={{ backgroundColor: '#9B9BB0' }}>
-      {/* Bouton Plein Écran */}
-      <button
-        onClick={toggleFullscreen}
-        className="absolute top-4 right-4 z-50 px-4 py-2 rounded-lg font-bold text-white transition-all hover:opacity-90 flex items-center gap-2"
-        style={{ backgroundColor: isFullscreen ? '#4CAF50' : '#2196F3' }}
-      >
-        {isFullscreen ? (
-          <>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-            Quitter
-          </>
-        ) : (
-          <>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-            </svg>
-            Plein écran
-          </>
-        )}
-      </button>
-
-      {/* Container avec bordure 3D */}
-      <div className="w-full max-w-lg rounded-lg overflow-hidden shadow-2xl" style={{ border: '6px solid #6B6B7B', boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.3), 0 8px 16px rgba(0,0,0,0.3)' }}>
-        {/* Contenu principal */}
-        <div className="p-8" style={{ backgroundColor: '#F5F5F5' }}>
-          {/* Icône serveur avec flèche verte */}
-          <div className="flex justify-center mb-6">
-            <div className="relative">
-              {/* Serveur */}
-              <div className="w-20 h-24 rounded-lg flex flex-col items-center justify-center gap-1" style={{ backgroundColor: '#B0B0B0', boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.2), 0 2px 4px rgba(0,0,0,0.3)' }}>
-                <div className="w-12 h-2 rounded" style={{ backgroundColor: '#505050' }} />
-                <div className="w-12 h-2 rounded" style={{ backgroundColor: '#505050' }} />
-                <div className="w-12 h-2 rounded" style={{ backgroundColor: '#505050' }} />
-                <div className="w-8 h-1 rounded mt-1" style={{ backgroundColor: '#00FF00' }} />
-              </div>
-              {/* Flèche verte circulaire */}
-              <div className="absolute -bottom-2 -right-2 w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: '#4CAF50', boxShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Texte français */}
-          <p className="text-center text-gray-800 text-xl font-medium mb-2">
-            L&apos;examen va commencer dans quelques secondes
-          </p>
-
-          {/* Texte arabe */}
-          <p className="text-center text-gray-700 text-lg" dir="rtl">
-            سيبدأ الامتحان خلال ثوانٍ قليلة
-          </p>
-
-          {/* Compteur */}
-          <div className="flex justify-center mt-6">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center text-3xl font-bold text-white" style={{ backgroundColor: '#4B0082', boxShadow: '0 4px 8px rgba(0,0,0,0.3)' }}>
-              {countdown}
-            </div>
-          </div>
-
-          {/* Info catégorie et série */}
-          <div className="text-center mt-6 text-gray-600 text-sm">
-            <p>Catégorie {category.id} | Série {series}</p>
-          </div>
-
-          {/* Bouton Annuler */}
-          <div className="flex justify-center mt-4">
-            <button
-              onClick={onCancel}
-              className="px-6 py-2 rounded-lg font-bold text-white transition-all hover:opacity-90"
-              style={{ backgroundColor: '#CC0000', boxShadow: '0 3px 0 #8B0000' }}
-            >
-              Annuler / إلغاء
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <div 
+      className="fixed inset-0 w-screen h-screen"
+      style={{ 
+        backgroundImage: 'url(/images/counter-bg.jpg)',
+        backgroundSize: '100% 100%',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      }}
+    />
   );
 };
 
@@ -725,8 +646,8 @@ export default function DrivingTestApp() {
       {screen === "categories" && <CategoriesScreen userRole={userRole} onSelectCategory={handleSelectCategory} onLogout={handleLogout} />}
       {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onBack={handleGoHome} />}
       {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} onSuccess={handlePasswordSuccess} onBack={() => setScreen("series")} />}
-      {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} onCancel={() => setScreen("password")} />}
-      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} onFinish={handleFinishTest} onBack={() => setScreen("counter")} />}
+      {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} />}
+      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} onFinish={handleFinishTest} onBack={() => setScreen("series")} />}
       {screen === "result" && selectedCategory && <ResultScreen score={30} total={selectedCategory.questionsPerSeries} onRestart={handleRestart} onHome={handleGoHome} />}
       {screen === "admin" && <AdminPanel onBack={handleLogout} />}
     </div>
