@@ -30,27 +30,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ar" suppressHydrationWarning>
-      <head>
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap');
-          
-          * {
-            font-family: 'Noto Sans Arabic', 'Segoe UI', Arial, sans-serif;
-          }
-          
-          html, body {
-            min-height: 100vh;
-            margin: 0;
-            padding: 0;
-          }
-          
-          body {
-            background: #E0E0E0;
-          }
-        `}</style>
-      </head>
+      <head />
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        style={{
+          fontFamily: "'Noto Sans Arabic', 'Segoe UI', Arial, sans-serif",
+          minHeight: "100vh",
+          margin: 0,
+          padding: 0,
+          background: "#E0E0E0"
+        }}
       >
         {children}
         <Toaster />
