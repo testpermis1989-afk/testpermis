@@ -100,7 +100,7 @@ const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: 
     
     const checkAllLoaded = () => {
       loadedCount++;
-      if (loadedCount === totalImages) {
+      if (loadedCount >= totalImages) {
         setImagesLoaded(true);
       }
     };
@@ -108,9 +108,19 @@ const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: 
     categoriesData.forEach((cat) => {
       const img = new window.Image();
       img.onload = checkAllLoaded;
-      img.onerror = checkAllLoaded;
+      img.onerror = () => {
+        console.log(`Image not found: ${cat.image}`);
+        checkAllLoaded();
+      };
       img.src = cat.image;
     });
+    
+    // Timeout de sécurité - afficher après 2 secondes max
+    const timeout = setTimeout(() => {
+      setImagesLoaded(true);
+    }, 2000);
+    
+    return () => clearTimeout(timeout);
   }, []);
 
   // Afficher un chargement léger
@@ -237,15 +247,15 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       '/images/pin-screen-bg.jpg',
       '/images/btn-fermer-new.png',
       '/images/btn-corriger.png',
-      '/images/chif-display.jpg',
-      ...Array.from({ length: 10 }, (_, i) => `/images/chiffre-${i}.png`)
+      '/images/chif-display.jpg'
     ];
     
     let loadedCount = 0;
+    const totalImages = imagesToLoad.length;
     
     const checkAllLoaded = () => {
       loadedCount++;
-      if (loadedCount === imagesToLoad.length) {
+      if (loadedCount >= totalImages) {
         setImageLoaded(true);
       }
     };
@@ -253,9 +263,19 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
     imagesToLoad.forEach((src) => {
       const img = new window.Image();
       img.onload = checkAllLoaded;
-      img.onerror = checkAllLoaded;
+      img.onerror = () => {
+        console.log(`Image not found: ${src}`);
+        checkAllLoaded();
+      };
       img.src = src;
     });
+    
+    // Timeout de sécurité - afficher l'écran après 2 secondes max
+    const timeout = setTimeout(() => {
+      setImageLoaded(true);
+    }, 2000);
+    
+    return () => clearTimeout(timeout);
   }, []);
 
   // Activer le plein écran et rotation horizontale automatiquement au chargement
