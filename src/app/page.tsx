@@ -325,12 +325,12 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       }}
     >
       {/* Zone d'affichage du code PIN - 4 cases */}
-      <div className="absolute flex gap-3" style={{ bottom: '30%', right: '12.5%' }}>
+      <div className="absolute flex" style={{ bottom: '30.5%', right: '13.5%', gap: 'clamp(0.3rem, 0.8vw, 0.8rem)' }}>
         {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="relative" style={{ width: '53px', height: '63px' }}>
+          <div key={index} className="relative" style={{ width: 'clamp(30px, 3vw, 45px)', height: 'clamp(38px, 4vw, 55px)' }}>
             {/* Image de fond avec la ligne rouge */}
-            <Image 
-              src="/images/chif-display.jpg" 
+            <Image
+              src="/images/chif-display.jpg"
               alt={`digit-${index}`}
               fill
               className="object-contain"
@@ -339,7 +339,7 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
             {/* Le chiffre entré */}
             {code[index] && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '36px', fontWeight: 'bold', color: '#FF0000' }}>
+                <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(16px, 2vw, 28px)', fontWeight: 'bold', color: '#FF0000' }}>
                   {code[index]}
                 </span>
               </div>
