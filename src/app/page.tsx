@@ -229,7 +229,36 @@ const exitFullscreen = () => {
 const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Category; series: number; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [isLandscape, setIsLandscape] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Vérifier l'orientation de l'écran
+  useEffect(() => {
+    const checkOrientation = () => {
+      // Vérifier si l'écran est en mode portrait (hauteur > largeur)
+      const isPortrait = window.innerHeight > window.innerWidth;
+      // Considérer comme mobile si la largeur est <= 768px
+      const isMobileScreen = window.innerWidth <= 768;
+      
+      if (isMobileScreen && isPortrait) {
+        setIsLandscape(false);
+      } else {
+        setIsLandscape(true);
+      }
+    };
+
+    // Vérifier au chargement
+    checkOrientation();
+
+    // Écouter les changements d'orientation
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+
+    return () => {
+      window.removeEventListener('resize', checkOrientation);
+      window.removeEventListener('orientationchange', checkOrientation);
+    };
+  }, []);
 
   // Précharger l'AudioContext au démarrage
   useEffect(() => {
@@ -353,6 +382,30 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
     setCode("");
   };
 
+  // Afficher un écran noir si pas en mode paysage sur mobile
+  if (!isLandscape) {
+    return (
+      <div className="fixed inset-0 w-screen h-screen bg-black flex flex-col items-center justify-center">
+        <div className="text-center">
+          <div className="mb-8">
+            <svg className="w-24 h-24 mx-auto text-white animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div className="text-white text-3xl font-bold mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
+            🔄 دوّر الهاتف
+          </div>
+          <div className="text-white text-xl" style={{ fontFamily: 'Arial, sans-serif' }}>
+            Tournez votre téléphone
+          </div>
+          <div className="text-gray-400 text-lg mt-4">
+            استخدم الوضع الأفقي
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Afficher un écran de chargement pendant le chargement de l'image
   if (!imageLoaded) {
     return (
@@ -373,15 +426,15 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
       }}
     >
       {/* Code PIN par défaut - "AB123456" */}
-      <div className="absolute flex items-center" style={{ top: '66.5%', left: '30%' }}>
-        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(11px, 1.8vw, 24px)', fontWeight: 'bold', color: 'white' }}>
+      <div className="absolute flex items-center" style={{ top: '66%', left: '30%' }}>
+        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '1.8vw', fontWeight: 'bold', color: 'white' }}>
           AB123456
         </span>
       </div>
 
       {/* Lettre de la catégorie - positionnée à côté de "Categorie" */}
-      <div className="absolute flex items-center" style={{ top: '74.8%', left: '37%' }}>
-        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(12px, 2vw, 26px)', fontWeight: 'bold', color: 'white' }}>
+      <div className="absolute flex items-center" style={{ top: 'clamp(72%, 75%, 75.5%)', left: '37%' }}>
+        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '1.56vw', fontWeight: 'bold', color: 'white' }}>
           {category.id}
         </span>
       </div>
@@ -401,7 +454,7 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
             {/* Le chiffre entré */}
             {code[index] && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(16px, 2vw, 28px)', fontWeight: 'bold', color: 'black' }}>
+                <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '2vw', fontWeight: 'bold', color: 'black' }}>
                   {code[index]}
                 </span>
               </div>
