@@ -219,17 +219,43 @@ const exitFullscreen = () => {
 const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Category; series: number; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
 
-  // Précharger l'image de fond
+  // Précharger l'AudioContext au démarrage
   useEffect(() => {
-    const img = new window.Image();
-    img.onload = () => setImageLoaded(true);
-    img.onerror = () => setImageLoaded(true);
-    img.src = '/images/pin-screen-bg.jpg';
+    try {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      setAudioContext(ctx);
+    } catch {
+      // Audio not supported
+    }
+  }, []);
+
+  // Précharger toutes les images de l'écran PIN
+  useEffect(() => {
+    const imagesToLoad = [
+      '/images/pin-screen-bg.jpg',
+      '/images/btn-fermer-new.png',
+      '/images/btn-corriger.png',
+      '/images/chif-display.jpg',
+      ...Array.from({ length: 10 }, (_, i) => `/images/chiffre-${i}.png`)
+    ];
     
-    // Précharger aussi les boutons
-    new window.Image().src = '/images/btn-fermer-new.png';
-    new window.Image().src = '/images/btn-corriger.png';
+    let loadedCount = 0;
+    
+    const checkAllLoaded = () => {
+      loadedCount++;
+      if (loadedCount === imagesToLoad.length) {
+        setImageLoaded(true);
+      }
+    };
+
+    imagesToLoad.forEach((src) => {
+      const img = new window.Image();
+      img.onload = checkAllLoaded;
+      img.onerror = checkAllLoaded;
+      img.src = src;
+    });
   }, []);
 
   // Activer le plein écran et rotation horizontale automatiquement au chargement
@@ -273,8 +299,9 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
 
   // Fonction pour jouer un son de clic
   const playClickSound = () => {
+    if (!audioContext) return;
+    
     try {
-      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
       
@@ -685,7 +712,7 @@ const TestScreen = ({ category, series, onFinish, onBack }: { category: Category
     >
       {/* Zone noire pour afficher l'image/vidéo de la question */}
       <div 
-        className="absolute bg-black border-4 border-white"
+        className="absolute bg-black border-[6px] border-white"
         style={{
           top: '7%',
           left: '3.5%',
@@ -701,21 +728,36 @@ const TestScreen = ({ category, series, onFinish, onBack }: { category: Category
           className="object-contain"
           unoptimized
         />
-        
-        {/* Bouton Stop en haut à droite */}
+      </div>
+
+      {/* Bouton Stop en haut à droite de l'écran */}
+      <div className="absolute group" style={{ top: '1%', right: '1%' }}>
         <button
           onClick={onBack}
-          className="absolute bg-red-600 hover:bg-red-700 text-white font-bold rounded-full flex items-center justify-center"
+          className="bg-red-600 hover:bg-red-700 text-white font-bold rounded-full flex items-center justify-center"
           style={{
-            top: '2%',
-            right: '2%',
-            width: 'clamp(40px, 4vw, 60px)',
-            height: 'clamp(40px, 4vw, 60px)',
-            fontSize: 'clamp(12px, 1.5vw, 18px)'
+            width: 'clamp(30px, 3vw, 45px)',
+            height: 'clamp(30px, 3vw, 45px)'
           }}
         >
-          ⏹
+          <div style={{ fontSize: 'clamp(16px, 2vw, 24px)' }}>⏹</div>
         </button>
+        {/* Info tooltip au survol */}
+        <div 
+          className="absolute opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-black/90 text-white rounded px-3 py-2 pointer-events-none"
+          style={{ 
+            top: '100%', 
+            right: '0', 
+            marginTop: '4px',
+            fontSize: 'clamp(10px, 1vw, 12px)',
+            maxWidth: '200px'
+          }}
+        >
+          <div className="font-bold mb-1">⏹ Arrêter la série</div>
+          <div>Permet de quitter la série d&apos;entraînement</div>
+          <div className="mt-1 text-yellow-300 text-xs">⚠️ Non disponible à l&apos;examen réel</div>
+          <div dir="rtl" className="mt-1 text-yellow-300 text-xs">⚠️ غير متوفر في الامتحان الحقيقي</div>
+        </div>
       </div>
     </div>
   );
