@@ -324,6 +324,20 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
         backgroundRepeat: 'no-repeat'
       }}
     >
+      {/* Code PIN par défaut - "AB123456" */}
+      <div className="absolute flex items-center" style={{ top: '66.5%', left: '30%' }}>
+        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(11px, 1.8vw, 24px)', fontWeight: 'bold', color: 'white' }}>
+          AB123456
+        </span>
+      </div>
+
+      {/* Lettre de la catégorie - positionnée à côté de "Categorie" */}
+      <div className="absolute flex items-center" style={{ top: '74.8%', left: '37%' }}>
+        <span style={{ fontFamily: 'Arial, sans-serif', fontSize: 'clamp(12px, 2vw, 26px)', fontWeight: 'bold', color: 'white' }}>
+          {category.id}
+        </span>
+      </div>
+
       {/* Zone d'affichage du code PIN - 4 cases */}
       <div className="absolute flex" style={{ bottom: '30.5%', right: '13.5%', gap: 'clamp(0.3rem, 0.8vw, 0.8rem)' }}>
         {[0, 1, 2, 3].map((index) => (
