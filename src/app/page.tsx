@@ -230,7 +230,6 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
     // Précharger aussi les boutons
     new window.Image().src = '/images/btn-fermer-new.png';
     new window.Image().src = '/images/btn-corriger.png';
-    new window.Image().src = '/images/chiffre-0.png';
   }, []);
 
   // Activer le plein écran et rotation horizontale automatiquement au chargement
@@ -326,15 +325,195 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
         backgroundRepeat: 'no-repeat'
       }}
     >
+      {/* Chiffre 1 */}
+      <button
+        onClick={() => handleKeyPress('1')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '21%', 
+          right: '26.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-1.png" 
+          alt="1" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 2 */}
+      <button
+        onClick={() => handleKeyPress('2')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '21%', 
+          right: '18.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-2.png" 
+          alt="2" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 3 */}
+      <button
+        onClick={() => handleKeyPress('3')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '21%', 
+          right: '10.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-3.png" 
+          alt="3" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 4 */}
+      <button
+        onClick={() => handleKeyPress('4')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '31%', 
+          right: '26.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-4.png" 
+          alt="4" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 5 */}
+      <button
+        onClick={() => handleKeyPress('5')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '31%', 
+          right: '18.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-5.png" 
+          alt="5" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 6 */}
+      <button
+        onClick={() => handleKeyPress('6')}
+        className="absolute transition-transform duration-150 active:scale-90"
+        style={{ 
+          top: '31%', 
+          right: '10.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-6.png" 
+          alt="6" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 7 */}
+      <button
+        onClick={() => handleKeyPress('7')}
+        className="absolute transition-transform duration-150 active:scale-90 z-10"
+        style={{ 
+          top: '40.5%', 
+          right: '26.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-7.png" 
+          alt="7" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 8 */}
+      <button
+        onClick={() => handleKeyPress('8')}
+        className="absolute transition-transform duration-150 active:scale-90 z-10"
+        style={{ 
+          top: '40.5%', 
+          right: '18.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-8.png" 
+          alt="8" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
+      {/* Chiffre 9 */}
+      <button
+        onClick={() => handleKeyPress('9')}
+        className="absolute transition-transform duration-150 active:scale-90 z-10"
+        style={{ 
+          top: '40.5%', 
+          right: '10.8%', 
+          width: '5%',
+          height: '11%'
+        }}
+      >
+        <Image 
+          src="/images/chiffre-9.png" 
+          alt="9" 
+          fill
+          className="object-contain"
+          unoptimized
+        />
+      </button>
+
       {/* Chiffre 0 */}
       <button
         onClick={() => handleKeyPress('0')}
-        className="absolute transition-transform duration-200 hover:scale-110 active:scale-90"
+        className="absolute transition-transform duration-150 active:scale-90"
         style={{ 
-          top: '37%', 
-          left: '69%', 
-          width: '22%',
-          height: '35%'
+          top: '42.6%', 
+          right: '11.3%', 
+          width: '19.6%',
+          height: '24.6%'
         }}
       >
         <Image 
