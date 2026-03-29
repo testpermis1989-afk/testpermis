@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -21,12 +15,69 @@ model User {
   updatedAt DateTime @updatedAt
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Category {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  nameAr      String?
+  seriesCount Int      @default(10)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  series      Serie[]
+}
+
+model Serie {
+  id             String     @id @default(cuid())
+  number         Int
+  categoryId     String
+  questionsCount Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  questions      Question[]
+  category       Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, number])
+}
+
+model Question {
+  id        String     @id @default(cuid())
+  serieId   String
+  order     Int
+  text      String?
+  image     String?
+  audio     String?
+  video     String?
+  duration  Int        @default(30)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  serie     Serie      @relation(fields: [serieId], references: [id], onDelete: Cascade)
+  responses Response[]
+
+  @@unique([serieId, order])
+}
+
+model Response {
+  id         String   @id @default(cuid())
+  questionId String
+  order      Int
+  text       String?
+  image      String?
+  isCorrect  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, order])
+}
+
+model TestResult {
+  id          String   @id @default(cuid())
+  userId      String?
+  categoryId  String
+  serieNumber Int
+  score       Int
+  total       Int
+  passed      Boolean
+  answers     String
+  createdAt   DateTime @default(now())
 }
