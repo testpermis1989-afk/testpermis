@@ -466,7 +466,19 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
   const [imageLoaded, setImageLoaded] = useState(false);
   const [orientationChecked, setOrientationChecked] = useState(false);
   const [isLandscape, setIsLandscape] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Détecter le mode plein écran
+  useEffect(() => {
+    const handleChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleChange);
+    document.addEventListener('webkitfullscreenchange', handleChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleChange);
+      document.removeEventListener('webkitfullscreenchange', handleChange);
+    };
+  }, []);
 
   // Vérifier l'orientation de l'écran
   useEffect(() => {
@@ -763,7 +775,7 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
         <div
           className="absolute overflow-hidden"
           style={{
-            top: '11%',
+            top: isFullscreen ? '14%' : '11%',
             left: '18%',
             width: 'clamp(120px, 30vw, 450px)',
             height: 'clamp(88px, 22vw, 330px)',
