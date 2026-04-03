@@ -771,21 +771,23 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
       <FullscreenButton />
 
       {/* Photo de l'utilisateur */}
-      {userPhoto && (
-        <div
-          className="absolute overflow-hidden"
-          style={{
-            top: isFullscreen ? '15%' : '11%',
-            left: '18%',
-            width: 'clamp(120px, 30vw, 450px)',
-            height: 'clamp(88px, 22vw, 330px)',
-            borderRadius: '12px',
-            border: '2px solid transparent',
-          }}
-        >
+      <div
+        className="absolute overflow-hidden"
+        style={{
+          top: isFullscreen ? '15%' : '11%',
+          left: '18%',
+          width: 'clamp(120px, 30vw, 450px)',
+          height: 'clamp(88px, 22vw, 330px)',
+          borderRadius: '12px',
+          border: '2px solid transparent',
+        }}
+      >
+        {userPhoto ? (
           <img src={userPhoto} alt="Photo" className="w-full h-full object-cover" />
-        </div>
-      )}
+        ) : (
+          <img src="/images/unknown-user.svg" alt="Utilisateur" className="w-full h-full object-cover" />
+        )}
+      </div>
 
       {/* N°CIN de l'utilisateur */}
       <div className="absolute flex items-center" style={{ top: '66%', left: '30%' }}>

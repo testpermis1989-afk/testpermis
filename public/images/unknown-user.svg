@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" fill="none">
+  <rect width="300" height="300" rx="20" fill="#e2e8f0"/>
+  <circle cx="150" cy="120" r="55" fill="#94a3b8"/>
+  <path d="M150 200c-60 0-110 30-110 65v20h220v-20c0-35-50-65-110-65z" fill="#94a3b8"/>
+  <text x="150" y="290" text-anchor="middle" font-family="Arial" font-size="14" fill="#64748b">Utilisateur</text>
+</svg>
