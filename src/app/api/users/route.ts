@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url)
+    const role = searchParams.get('role')
+
     const users = await db.user.findMany({
+      where: role ? { role } : undefined,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -48,6 +52,7 @@ export async function POST(request: NextRequest) {
       examDate,
       pinCode,
       isActive,
+      role,
     } = body
 
     if (!cin) {
@@ -81,6 +86,7 @@ export async function POST(request: NextRequest) {
         examDate: examDate || null,
         pinCode: pinCode || '',
         isActive: isActive !== undefined ? isActive : true,
+        role: role || 'user',
       },
     })
 

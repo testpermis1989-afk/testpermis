@@ -73,12 +73,6 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
     setError("");
     if (!cin.trim()) { setError("N°CIN est obligatoire"); return; }
 
-    // Admin login
-    if (cin === "admin" && password === "admin123") {
-      onAdminLogin();
-      return;
-    }
-
     setLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
@@ -2146,7 +2140,7 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
 };
 
 // ===== PANEL ADMIN =====
-type AdminTab = 'import' | 'series' | 'users';
+type AdminTab = 'import' | 'series' | 'users' | 'admins';
 
 interface QuestionView {
   id: string;
@@ -2340,7 +2334,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   const fetchUsers = async () => {
     setUsersLoading(true);
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch('/api/users?role=user');
       const data = await res.json();
       setUsers(data.users || []);
     } catch { setUsers([]); }
@@ -2433,8 +2427,83 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   // Load users when tab switches to users
   useEffect(() => {
     if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'admins') fetchAdmins();
   }, [activeTab]);
-  
+
+  // ===== Gestion des administrateurs =====
+  const [admins, setAdmins] = useState<UserData[]>([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [showAdminForm, setShowAdminForm] = useState(false);
+  const [editingAdmin, setEditingAdmin] = useState<UserData | null>(null);
+  const [savingAdmin, setSavingAdmin] = useState(false);
+  const [adminFormCin, setAdminFormCin] = useState('');
+  const [adminFormPassword, setAdminFormPassword] = useState('');
+  const [adminFormNom, setAdminFormNom] = useState('');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [adminMsgType, setAdminMsgType] = useState<'success' | 'error'>('success');
+
+  const resetAdminForm = () => {
+    setEditingAdmin(null);
+    setAdminFormCin('');
+    setAdminFormPassword('');
+    setAdminFormNom('');
+    setAdminMessage('');
+  };
+
+  const fetchAdmins = async () => {
+    setAdminsLoading(true);
+    try {
+      const res = await fetch('/api/users?role=admin');
+      const data = await res.json();
+      setAdmins(data.users || []);
+    } catch { setAdmins([]); }
+    finally { setAdminsLoading(false); }
+  };
+
+  const handleSaveAdmin = async () => {
+    if (!adminFormCin.trim()) { setAdminMessage("Nom d'utilisateur est obligatoire"); setAdminMsgType('error'); return; }
+    if (!editingAdmin && !adminFormPassword) { setAdminMessage('Mot de passe est obligatoire'); setAdminMsgType('error'); return; }
+    setSavingAdmin(true); setAdminMessage('');
+    try {
+      const body: any = {
+        cin: adminFormCin.trim().toUpperCase(),
+        nomFr: adminFormNom || null,
+        role: 'admin',
+        isActive: true,
+        permisCategory: 'ALL',
+      };
+      if (!editingAdmin && adminFormPassword) body.password = adminFormPassword;
+      if (editingAdmin && adminFormPassword) body.password = adminFormPassword;
+
+      const url = editingAdmin ? `/api/users/${editingAdmin.cin}` : '/api/users';
+      const method = editingAdmin ? 'PUT' : 'POST';
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { setAdminMessage(data.error || 'Erreur'); setAdminMsgType('error'); return; }
+      setAdminMessage(editingAdmin ? 'Administrateur modifié ✓' : 'Administrateur créé ✓'); setAdminMsgType('success');
+      if (!editingAdmin) resetAdminForm();
+      fetchAdmins();
+    } catch { setAdminMessage('Erreur serveur'); setAdminMsgType('error'); }
+    finally { setSavingAdmin(false); }
+  };
+
+  const handleEditAdmin = (a: UserData) => {
+    setEditingAdmin(a);
+    setAdminFormCin(a.cin);
+    setAdminFormPassword('');
+    setAdminFormNom(a.nomFr || '');
+    setAdminMessage('');
+    setShowAdminForm(true);
+  };
+
+  const handleDeleteAdmin = async (cin: string) => {
+    if (!confirm(`Supprimer l'administrateur ${cin} ?`)) return;
+    try {
+      const res = await fetch(`/api/users/${cin}`, { method: 'DELETE' });
+      if (res.ok) fetchAdmins();
+    } catch {}
+  };
+
   // Media upload states
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
@@ -3027,6 +3096,12 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
             className={`px-6 py-3 font-bold transition-colors ${activeTab === 'users' ? 'bg-gray-600 text-yellow-400' : 'text-gray-300 hover:text-white'}`}
           >
             👥 Utilisateurs
+          </button>
+          <button
+            onClick={() => setActiveTab('admins')}
+            className={`px-6 py-3 font-bold transition-colors ${activeTab === 'admins' ? 'bg-gray-600 text-yellow-400' : 'text-gray-300 hover:text-white'}`}
+          >
+            🔑 Administrateurs
           </button>
         </div>
 
@@ -3978,6 +4053,92 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                 </table>
               </div>
               <div className="mt-2 text-gray-400 text-xs text-right">Total: {users.length} utilisateur(s)</div>
+            </div>
+          )}
+
+          {/* Tab: Administrateurs */}
+          {activeTab === 'admins' && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-white">🔑 Gestion des administrateurs</h3>
+                <button onClick={() => { resetAdminForm(); setShowAdminForm(true); }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm">➕ Nouvel administrateur</button>
+              </div>
+
+              {/* Formulaire administrateur */}
+              {showAdminForm && (
+                <div className="bg-gray-750 border border-gray-600 rounded-xl p-4 mb-4">
+                  <h4 className="text-white font-bold mb-3">{editingAdmin ? '✏️ Modifier administrateur' : '➕ Nouvel administrateur'}</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Nom d'utilisateur *</label>
+                      <input type="text" value={adminFormCin} onChange={e => setAdminFormCin(e.target.value.toUpperCase())} disabled={!!editingAdmin} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm disabled:opacity-50 uppercase" placeholder="Identifiant admin" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">{editingAdmin ? 'Nouveau mot de passe (laisser vide si inchangé)' : 'Mot de passe *'}</label>
+                      <input type="password" value={adminFormPassword} onChange={e => setAdminFormPassword(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Mot de passe" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Nom complet</label>
+                      <input type="text" value={adminFormNom} onChange={e => setAdminFormNom(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Nom de l'admin" />
+                    </div>
+                  </div>
+                  {adminMessage && (
+                    <div className={`mb-3 px-4 py-2 rounded-lg text-sm ${adminMsgType === 'error' ? 'bg-red-900/50 text-red-300 border border-red-500' : 'bg-green-900/50 text-green-300 border border-green-500'}`}>
+                      {adminMessage}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={handleSaveAdmin} disabled={savingAdmin} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">
+                      {savingAdmin ? '💾 Enregistrement...' : '💾 Enregistrer'}
+                    </button>
+                    <button onClick={() => { setShowAdminForm(false); resetAdminForm(); }} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm" disabled={savingAdmin}>Annuler</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Liste des administrateurs */}
+              {adminsLoading ? (
+                <div className="text-center py-8"><div className="w-6 h-6 border-2 border-gray-400 border-t-white rounded-full animate-spin mx-auto mb-2"></div><p className="text-gray-400 text-sm">Chargement...</p></div>
+              ) : admins.length === 0 ? (
+                <div className="text-center py-8"><p className="text-gray-500">Aucun administrateur - لا يوجد مدراء</p></div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-600">
+                        <th className="text-left py-2 px-3 text-gray-300 font-bold">Identifiant</th>
+                        <th className="text-left py-2 px-3 text-gray-300 font-bold">Nom</th>
+                        <th className="text-left py-2 px-3 text-gray-300 font-bold">Statut</th>
+                        <th className="text-left py-2 px-3 text-gray-300 font-bold">Créé le</th>
+                        <th className="text-center py-2 px-3 text-gray-300 font-bold">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {admins.map((a) => (
+                        <tr key={a.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                          <td className="px-3 py-2">
+                            <span className="text-yellow-400 font-bold">{a.cin}</span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-300">{a.nomFr || '-'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded text-white text-xs font-bold ${a.isActive ? 'bg-green-600' : 'bg-red-600'}`}>
+                              {a.isActive ? '✓ Actif' : '✗ Désactivé'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-400 text-xs">{a.createdAt ? new Date(a.createdAt).toLocaleDateString('fr-FR') : '-'}</td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => handleEditAdmin(a)} className="bg-yellow-600 hover:bg-yellow-700 text-white px-2 py-1 rounded text-xs">✏️</button>
+                              <button onClick={() => handleDeleteAdmin(a.cin)} className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs">🗑️</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="mt-2 text-gray-400 text-xs text-right">Total: {admins.length} administrateur(s)</div>
+                </div>
+              )}
             </div>
           )}
         </div>
