@@ -15,7 +15,22 @@ import {
 
 // Types
 type UserRole = "admin" | "user" | null;
-type Screen = "login" | "categories" | "series" | "password" | "counter" | "test" | "result" | "correction" | "admin";
+type Screen = "login" | "categories" | "series" | "password" | "counter" | "test" | "result" | "correction" | "admin" | "profile";
+
+interface UserData {
+  id: string;
+  cin: string;
+  nomFr: string | null;
+  prenomFr: string | null;
+  nomAr: string | null;
+  prenomAr: string | null;
+  photo: string | null;
+  permisCategory: string;
+  examDate: string | null;
+  pinCode: string;
+  isActive: boolean;
+  role: string;
+}
 
 interface Category {
   id: string;
@@ -48,18 +63,39 @@ const RoadSignsBackground = () => (
 );
 
 // ===== ÉCRAN DE CONNEXION =====
-const LoginScreen = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
-  const [username, setUsername] = useState("");
+const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => void; onAdminLogin: () => void }) => {
+  const [cin, setCin] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    if (username === "admin" && password === "admin123") {
-      onLogin("admin");
-    } else if (username === "user" && password === "user123") {
-      onLogin("user");
-    } else {
-      setError("Identifiants incorrects");
+  const handleLogin = async () => {
+    setError("");
+    if (!cin.trim()) { setError("N°CIN est obligatoire"); return; }
+
+    // Admin login
+    if (cin === "admin" && password === "admin123") {
+      onAdminLogin();
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cin: cin.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Identifiants incorrects');
+        return;
+      }
+      onLogin(data.user);
+    } catch {
+      setError('Erreur de connexion');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -82,16 +118,18 @@ const LoginScreen = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
           </div>
           {error && <div className="bg-red-100 border-2 border-red-400 text-red-700 px-4 py-2 rounded-lg mb-4 text-center">{error}</div>}
           <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2">Nom d&apos;utilisateur</label>
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-gray-800" placeholder="Entrez votre login" />
+            <label className="block text-gray-700 text-sm font-bold mb-2">N°CIN - رقم بطاقة التعريف الوطنية</label>
+            <input type="text" value={cin} onChange={(e) => setCin(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-gray-800" placeholder="Entrez votre N°CIN" />
           </div>
           <div className="mb-6">
             <label className="block text-gray-700 text-sm font-bold mb-2">Mot de passe</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-gray-800" placeholder="Entrez votre mot de passe" onKeyDown={(e) => e.key === 'Enter' && handleLogin()} />
           </div>
-          <button onClick={handleLogin} className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:from-blue-600 hover:to-blue-700 shadow-lg">Se connecter / تسجيل الدخول</button>
+          <button onClick={handleLogin} disabled={loading} className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:from-blue-600 hover:to-blue-700 shadow-lg disabled:opacity-50">
+            {loading ? 'Connexion...' : 'Se connecter / تسجيل الدخول'}
+          </button>
           <div className="mt-4 p-3 bg-gray-100 rounded-lg text-xs">
-            <p className="text-center text-gray-600">Demo: admin/admin123 ou user/user123</p>
+            <p className="text-center text-gray-600">Admin: admin / admin123</p>
           </div>
         </div>
       </div>
@@ -100,7 +138,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (role: UserRole) => void }) => {
 };
 
 // ===== ÉCRAN DES CATÉGORIES =====
-const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: UserRole; onSelectCategory: (cat: Category) => void; onLogout: () => void }) => {
+const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { user: UserData | null; onSelectCategory: (cat: Category) => void; onLogout: () => void; onProfile: () => void }) => {
   const [imagesLoaded, setImagesLoaded] = useState(false);
 
   // Précharger les images des catégories
@@ -151,7 +189,13 @@ const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: 
       <div className="absolute inset-2 md:inset-4 border-2 md:border-4 border-gray-500 rounded-lg bg-gray-300/80 shadow-inner flex flex-col">
         <div className="bg-gray-500 text-white px-4 py-2 flex justify-between items-center rounded-t-lg">
           <div className="flex items-center gap-4">
-            <span className="text-sm">{userRole === "admin" ? "👑 Admin" : "👤 User"}</span>
+            {user && user.photo ? (
+              <img src={user.photo} alt="" className="w-8 h-8 rounded-full object-cover border-2 border-white" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">👤</div>
+            )}
+            <span className="text-sm">{user ? `${user.prenomFr || ''} ${user.nomFr || ''}` : '👤'}</span>
+            <button onClick={onProfile} className="bg-gray-600 hover:bg-gray-400 px-2 py-1 rounded text-xs font-bold">⚙️ Profil</button>
             <button onClick={onLogout} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-xs font-bold">❌ Déconnexion</button>
           </div>
           <div className="text-sm font-bold">المملكة المغربية</div>
@@ -297,7 +341,7 @@ const exitFullscreen = () => {
 };
 
 // ===== ÉCRAN MOT DE PASSE (NOUVEAU DESIGN) =====
-const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Category; series: number; onSuccess: () => void; onBack: () => void }) => {
+const PasswordScreen = ({ category, series, userPin, onSuccess, onBack }: { category: Category; series: number; userPin: string; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
   const [imageLoaded, setImageLoaded] = useState(false);
   const [orientationChecked, setOrientationChecked] = useState(false);
@@ -426,11 +470,17 @@ const PasswordScreen = ({ category, series, onSuccess, onBack }: { category: Cat
   useEffect(() => {
     if (code.length === 4) {
       const timer = setTimeout(() => {
-        onSuccess();
+        // Si PIN utilisateur vide → accepter tout
+        // Si PIN rempli → vérifier
+        if (!userPin || userPin === '' || code === userPin) {
+          onSuccess();
+        } else {
+          setCode(""); // mauvais PIN → reset
+        }
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [code, onSuccess]);
+  }, [code, onSuccess, userPin]);
 
   // Fonction pour jouer un son de clic
   const playClickSound = () => {
@@ -2060,11 +2110,198 @@ interface QuestionView {
   responses: { order: number; isCorrect: boolean }[];
 }
 
+// ===== ÉCRAN PROFIL UTILISATEUR =====
+const UserProfileScreen = ({ user, onBack, onLogout }: { user: UserData; onBack: () => void; onLogout: () => void }) => {
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [message, setMessage] = useState('');
+  const [msgType, setMsgType] = useState<'success' | 'error'>('success');
+  const [loading, setLoading] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword) { setMessage('Remplissez tous les champs'); setMsgType('error'); return; }
+    if (newPassword.length < 4) { setMessage('Le mot de passe doit avoir au moins 4 caractères'); setMsgType('error'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/users/${user.cin}/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMessage(data.error || 'Erreur'); setMsgType('error'); return; }
+      setMessage('Mot de passe modifié ✓'); setMsgType('success');
+      setOldPassword(''); setNewPassword('');
+    } catch { setMessage('Erreur serveur'); setMsgType('error'); }
+    finally { setLoading(false); }
+  };
+
+  const handleChangePin = async () => {
+    if (newPin.length !== 4 && newPin !== '') { setMessage('Le PIN doit avoir exactement 4 chiffres (ou laisser vide)'); setMsgType('error'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/users/${user.cin}/change-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: newPin }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setMessage(data.error || 'Erreur'); setMsgType('error'); return; }
+      setMessage(newPin ? `PIN changé en ${newPin} ✓` : 'PIN supprimé (accès libre) ✓'); setMsgType('success');
+      setNewPin('');
+    } catch { setMessage('Erreur serveur'); setMsgType('error'); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 p-4">
+      <div className="max-w-lg mx-auto">
+        <div className="bg-gray-500 text-white px-4 py-3 rounded-t-lg flex justify-between items-center">
+          <button onClick={onBack} className="bg-gray-600 hover:bg-gray-700 px-4 py-1 rounded font-bold">← Retour</button>
+          <h2 className="text-xl font-bold">⚙️ Mon Profil</h2>
+          <button onClick={onLogout} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm font-bold">❌</button>
+        </div>
+        <div className="bg-white/90 rounded-b-lg p-6 shadow-xl space-y-6">
+          {/* Info utilisateur */}
+          <div className="flex items-center gap-4 pb-4 border-b">
+            {user.photo ? (
+              <img src={user.photo} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-gray-300" />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-gray-400 flex items-center justify-center text-2xl">👤</div>
+            )}
+            <div>
+              <p className="font-bold text-gray-800 text-lg">{user.prenomFr} {user.nomFr}</p>
+              <p className="text-gray-600 text-sm" dir="rtl">{user.prenomAr} {user.nomAr}</p>
+              <p className="text-gray-500 text-xs mt-1">N°CIN: {user.cin} | Catégorie: {user.permisCategory}</p>
+              {user.examDate && <p className="text-blue-600 text-xs">📅 Examen: {user.examDate}</p>}
+            </div>
+          </div>
+
+          {message && (
+            <div className={`px-4 py-2 rounded-lg text-center text-sm font-bold ${msgType === 'success' ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-red-100 text-red-700 border border-red-300'}`}>
+              {message}
+            </div>
+          )}
+
+          {/* Changer mot de passe */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-gray-700 flex items-center gap-2">🔐 Changer le mot de passe</h3>
+            <input type="password" placeholder="Ancien mot de passe" value={oldPassword} onChange={e => setOldPassword(e.target.value)} className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500" />
+            <input type="password" placeholder="Nouveau mot de passe" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500" />
+            <button onClick={handleChangePassword} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold disabled:opacity-50">Modifier le mot de passe</button>
+          </div>
+
+          {/* Changer PIN */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-gray-700 flex items-center gap-2">🔑 Code PIN ({user.pinCode ? user.pinCode : 'Non défini — accès libre'})</h3>
+            <p className="text-gray-500 text-xs">Laissez vide si vous voulez supprimer le PIN (accès libre à l&apos;écran PIN)</p>
+            <input type="text" maxLength={4} placeholder="Nouveau PIN (4 chiffres)" value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))} className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500" />
+            <button onClick={handleChangePin} disabled={loading} className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold disabled:opacity-50">Modifier le PIN</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ===== PANNEAU ADMIN =====
 const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('import');
   const [category, setCategory] = useState<string>('A');
   const [serie, setSerie] = useState<number>(1);
   const [seriesData, setSeriesData] = useState<{ category: string; serie: number; questions: number }[]>([]);
+
+  // Users management states
+  const [users, setUsers] = useState<UserData[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [savingUser, setSavingUser] = useState(false);
+  const [formCin, setFormCin] = useState('');
+  const [formNomFr, setFormNomFr] = useState('');
+  const [formPrenomFr, setFormPrenomFr] = useState('');
+  const [formNomAr, setFormNomAr] = useState('');
+  const [formPrenomAr, setFormPrenomAr] = useState('');
+  const [formCategory, setFormCategory] = useState('B');
+  const [formExamDate, setFormExamDate] = useState('');
+  const [formPin, setFormPin] = useState('');
+  const [formPassword, setFormPassword] = useState('');
+  const [formMessage, setFormMessage] = useState('');
+  const [formMsgType, setFormMsgType] = useState<'success' | 'error'>('success');
+
+  const resetUserForm = () => {
+    setFormCin(''); setFormNomFr(''); setFormPrenomFr(''); setFormNomAr('');
+    setFormPrenomAr(''); setFormCategory('B'); setFormExamDate(''); setFormPin('');
+    setFormPassword(''); setFormMessage(''); setEditingUser(null);
+  };
+
+  const fetchUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      setUsers(data.users || []);
+    } catch { setUsers([]); }
+    finally { setUsersLoading(false); }
+  };
+
+  const handleSaveUser = async () => {
+    if (!formCin.trim()) { setFormMessage('N°CIN est obligatoire'); setFormMsgType('error'); return; }
+    setSavingUser(true); setFormMessage('');
+    try {
+      const body: any = {
+        cin: formCin.trim(),
+        nomFr: formNomFr || null,
+        prenomFr: formPrenomFr || null,
+        nomAr: formNomAr || null,
+        prenomAr: formPrenomAr || null,
+        permisCategory: formCategory,
+        examDate: formExamDate || null,
+        pinCode: formPin,
+      };
+      if (!editingUser && formPassword) body.password = formPassword;
+
+      const url = editingUser ? `/api/users/${editingUser.cin}` : '/api/users';
+      const method = editingUser ? 'PUT' : 'POST';
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { setFormMessage(data.error || 'Erreur'); setFormMsgType('error'); return; }
+      setFormMessage(editingUser ? 'Utilisateur modifié ✓' : 'Utilisateur créé ✓'); setFormMsgType('success');
+      if (!editingUser) resetUserForm();
+      fetchUsers();
+    } catch { setFormMessage('Erreur serveur'); setFormMsgType('error'); }
+    finally { setSavingUser(false); }
+  };
+
+  const handleEditUser = (u: UserData) => {
+    setEditingUser(u);
+    setFormCin(u.cin); setFormNomFr(u.nomFr || ''); setFormPrenomFr(u.prenomFr || '');
+    setFormNomAr(u.nomAr || ''); setFormPrenomAr(u.prenomAr || '');
+    setFormCategory(u.permisCategory); setFormExamDate(u.examDate || '');
+    setFormPin(u.pinCode || ''); setFormPassword(''); setFormMessage('');
+    setShowUserForm(true);
+  };
+
+  const handleDeleteUser = async (cin: string) => {
+    if (!confirm(`Supprimer l'utilisateur ${cin} ?`)) return;
+    try {
+      const res = await fetch(`/api/users/${cin}`, { method: 'DELETE' });
+      if (res.ok) fetchUsers();
+    } catch {}
+  };
+
+  const handleToggleActive = async (cin: string) => {
+    try {
+      await fetch(`/api/users/${cin}/toggle-active`, { method: 'POST' });
+      fetchUsers();
+    } catch {}
+  };
+
+  // Load users when tab switches to users
+  useEffect(() => {
+    if (activeTab === 'users') fetchUsers();
+  }, [activeTab]);
   
   // Media upload states
   const [mediaFile, setMediaFile] = useState<File | null>(null);
@@ -3448,11 +3685,123 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           {/* Tab: Users */}
           {activeTab === 'users' && (
             <div>
-              <h3 className="text-xl font-bold text-white mb-4">👥 Gestion des utilisateurs</h3>
-              <div className="text-gray-400 text-center py-8">
-                <p className="text-4xl mb-4">🚧</p>
-                <p>Fonctionnalité en cours de développement</p>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-xl font-bold text-white">👥 Gestion des utilisateurs</h3>
+                <button onClick={() => { setEditingUser(null); setShowUserForm(true); }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm">➕ Nouvel utilisateur</button>
               </div>
+
+              {/* Formulaire utilisateur */}
+              {showUserForm && (
+                <div className="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-600">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">N°CIN *</label>
+                      <input type="text" value={formCin} onChange={e => setFormCin(e.target.value)} disabled={!!editingUser} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm disabled:opacity-50" placeholder="CIN obligatoire" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Nom (FR)</label>
+                      <input type="text" value={formNomFr} onChange={e => setFormNomFr(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Nom en français" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Prénom (FR)</label>
+                      <input type="text" value={formPrenomFr} onChange={e => setFormPrenomFr(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Prénom en français" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">النسب (عربي)</label>
+                      <input type="text" value={formNomAr} onChange={e => setFormNomAr(e.target.value)} dir="rtl" className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="النسب بالعربية" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">الإسم (عربي)</label>
+                      <input type="text" value={formPrenomAr} onChange={e => setFormPrenomAr(e.target.value)} dir="rtl" className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="الإسم بالعربية" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Catégorie permis</label>
+                      <select value={formCategory} onChange={e => setFormCategory(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm">
+                        {['A','B','C','D','E'].map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Date d&apos;examen</label>
+                      <input type="date" value={formExamDate} onChange={e => setFormExamDate(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Code PIN</label>
+                      <input type="text" maxLength={4} value={formPin} onChange={e => setFormPin(e.target.value.replace(/\D/g, ''))} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="4 chiffres ou vide" />
+                    </div>
+                    {!editingUser && (
+                      <div>
+                        <label className="block text-gray-300 text-xs mb-1">Mot de passe</label>
+                        <input type="text" value={formPassword} onChange={e => setFormPassword(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Défaut: 1234" />
+                      </div>
+                    )}
+                  </div>
+                  {formMessage && (
+                    <div className={`px-3 py-1 rounded text-sm mb-2 ${formMsgType === 'success' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{formMessage}</div>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={handleSaveUser} disabled={savingUser} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">
+                      {savingUser ? '...' : (editingUser ? '💾 Modifier' : '➕ Créer')}
+                    </button>
+                    <button onClick={() => { setShowUserForm(false); resetUserForm(); }} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm">Annuler</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tableau utilisateurs */}
+              <div className="overflow-x-auto max-h-[60vh] overflow-y-auto rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-700 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-gray-300">Photo</th>
+                      <th className="px-3 py-2 text-left text-gray-300">CIN</th>
+                      <th className="px-3 py-2 text-left text-gray-300">Nom (FR)</th>
+                      <th className="px-3 py-2 text-left text-gray-300">Nom (AR)</th>
+                      <th className="px-3 py-2 text-left text-gray-300">Catégorie</th>
+                      <th className="px-3 py-2 text-left text-gray-300">Examen</th>
+                      <th className="px-3 py-2 text-left text-gray-300">PIN</th>
+                      <th className="px-3 py-2 text-center text-gray-300">Statut</th>
+                      <th className="px-3 py-2 text-center text-gray-300">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersLoading ? (
+                      <tr><td colSpan={9} className="text-center py-8 text-gray-400">Chargement...</td></tr>
+                    ) : users.length === 0 ? (
+                      <tr><td colSpan={9} className="text-center py-8 text-gray-400">Aucun utilisateur</td></tr>
+                    ) : (
+                      users.map(u => (
+                        <tr key={u.cin} className="border-b border-gray-700 hover:bg-gray-800/50">
+                          <td className="px-3 py-2">
+                            {u.photo ? (
+                              <img src={u.photo} alt="" className="w-8 h-8 rounded-full object-cover" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-xs">👤</div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-white font-mono">{u.cin}</td>
+                          <td className="px-3 py-2 text-white">{u.prenomFr} {u.nomFr}</td>
+                          <td className="px-3 py-2 text-white" dir="rtl">{u.prenomAr} {u.nomAr}</td>
+                          <td className="px-3 py-2"><span className="bg-blue-600 px-2 py-0.5 rounded text-white text-xs font-bold">{u.permisCategory}</span></td>
+                          <td className="px-3 py-2 text-gray-300 text-xs">{u.examDate || '-'}</td>
+                          <td className="px-3 py-2 text-gray-300 text-xs">{u.pinCode || <span className="text-green-400">Libre</span>}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button onClick={() => handleToggleActive(u.cin)} className={`px-3 py-1 rounded-full text-xs font-bold ${u.isActive ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}>
+                              {u.isActive ? '✓ Actif' : '✗ Désactivé'}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex gap-1 justify-center">
+                              <button onClick={() => handleEditUser(u)} className="bg-yellow-600 hover:bg-yellow-700 text-white px-2 py-1 rounded text-xs">✏️</button>
+                              <button onClick={() => handleDeleteUser(u.cin)} className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs">🗑️</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-2 text-gray-400 text-xs text-right">Total: {users.length} utilisateur(s)</div>
             </div>
           )}
         </div>
@@ -3496,11 +3845,17 @@ export default function DrivingTestApp() {
   const [selectedSeries, setSelectedSeries] = useState<number>(1);
   const [selectedChronoTime, setSelectedChronoTime] = useState<number>(15);
   const [melangeQuestions, setMelangeQuestions] = useState<QuestionData[] | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
 
-  const handleLogin = (role: UserRole) => { setUserRole(role); setScreen(role === "admin" ? "admin" : "categories"); };
-  const handleLogout = () => { setUserRole(null); setScreen("login"); setSelectedCategory(null); };
-  const handleSelectCategory = (cat: Category) => { setSelectedCategory(cat); setScreen("series"); };
-  const handleSelectSeries = (series: number, chronoTime: number) => { setMelangeQuestions(null); setSelectedSeries(series); setSelectedChronoTime(chronoTime); setScreen("password"); };
+  const handleLogin = (user: UserData) => {
+    setCurrentUser(user);
+    setUserRole(user.role === 'admin' ? 'admin' : 'user');
+    setScreen(user.role === 'admin' ? 'admin' : 'categories');
+  };
+  const handleAdminLogin = () => { setUserRole('admin'); setCurrentUser(null); setScreen('admin'); };
+  const handleLogout = () => { setUserRole(null); setCurrentUser(null); setScreen('login'); setSelectedCategory(null); setMelangeQuestions(null); };
+  const handleSelectCategory = (cat: Category) => { setSelectedCategory(cat); setScreen('series'); };
+  const handleSelectSeries = (series: number, chronoTime: number) => { setMelangeQuestions(null); setSelectedSeries(series); setSelectedChronoTime(chronoTime); setScreen('password'); };
   const handleMelange = async (chronoTime: number) => {
     if (!selectedCategory) return;
     setSelectedChronoTime(chronoTime);
@@ -3509,31 +3864,32 @@ export default function DrivingTestApp() {
       const data = await res.json();
       if (data.questions && data.questions.length > 0) {
         setMelangeQuestions(data.questions);
-        setSelectedSeries(0); // série 0 = mélange
-        setScreen("password");
+        setSelectedSeries(0);
+        setScreen('password');
       }
     } catch (error) {
       console.error('Error fetching melange questions:', error);
     }
   };
-  const handlePasswordSuccess = () => { setScreen("counter"); };
-  const handleCounterStart = () => { setScreen("test"); };
+  const handlePasswordSuccess = () => { setScreen('counter'); };
+  const handleCounterStart = () => { setScreen('test'); };
   const [testResult, setTestResult] = useState<{ questions: QuestionData[]; userAnswers: number[][]; score: number; total: number } | null>(null);
-  const handleFinishTest = (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => { setTestResult(result); setScreen("result"); };
-  const handleRestart = () => { setScreen("password"); };
-  const handleGoHome = () => { setScreen("categories"); setSelectedCategory(null); setMelangeQuestions(null); };
+  const handleFinishTest = (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => { setTestResult(result); setScreen('result'); };
+  const handleRestart = () => { setScreen('password'); };
+  const handleGoHome = () => { setScreen('categories'); setSelectedCategory(null); setMelangeQuestions(null); };
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "Arial, sans-serif" }}>
-      {screen === "login" && <LoginScreen onLogin={handleLogin} />}
-      {screen === "categories" && <CategoriesScreen userRole={userRole} onSelectCategory={handleSelectCategory} onLogout={handleLogout} />}
+      {screen === "login" && <LoginScreen onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
+      {screen === "categories" && <CategoriesScreen user={currentUser} onSelectCategory={handleSelectCategory} onLogout={handleLogout} onProfile={() => setScreen('profile')} />}
       {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onMelange={handleMelange} onBack={handleGoHome} />}
-      {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} onSuccess={handlePasswordSuccess} onBack={() => setScreen("series")} />}
+      {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} userPin={currentUser?.pinCode || ''} onSuccess={handlePasswordSuccess} onBack={() => setScreen('series')} />}
       {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} />}
-      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} onFinish={handleFinishTest} onBack={() => setScreen("series")} />}
-      {screen === "result" && selectedCategory && testResult && <ResultScreen score={testResult.score} total={testResult.total} onRestart={handleRestart} onHome={handleGoHome} onCorrection={() => setScreen("correction")} />}
-      {screen === "correction" && selectedCategory && testResult && <CorrectionScreen questions={testResult.questions} userAnswers={testResult.userAnswers} onBack={() => setScreen("result")} />}
+      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} onFinish={handleFinishTest} onBack={() => setScreen('series')} />}
+      {screen === "result" && selectedCategory && testResult && <ResultScreen score={testResult.score} total={testResult.total} onRestart={handleRestart} onHome={handleGoHome} onCorrection={() => setScreen('correction')} />}
+      {screen === "correction" && selectedCategory && testResult && <CorrectionScreen questions={testResult.questions} userAnswers={testResult.userAnswers} onBack={() => setScreen('result')} />}
       {screen === "admin" && <AdminPanel onBack={handleLogout} />}
+      {screen === "profile" && currentUser && <UserProfileScreen user={currentUser} onBack={() => setScreen('categories')} onLogout={handleLogout} />}
     </div>
   );
 }

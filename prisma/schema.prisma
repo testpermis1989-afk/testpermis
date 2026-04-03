@@ -8,11 +8,22 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(cuid())
+  cin             String   @unique
+  password        String   @default("1234")
+  nomFr           String?
+  prenomFr        String?
+  nomAr           String?
+  prenomAr        String?
+  photo           String?
+  permisCategory  String   @default("B")
+  examDate        String?
+  pinCode         String   @default("")
+  isActive        Boolean  @default(true)
+  role            String   @default("user")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  testResults     TestResult[]
 }
 
 model Category {
@@ -64,7 +75,7 @@ model Response {
   image      String?
   isCorrect  Boolean  @default(false)
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  updatedAt DateTime @updatedAt
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@unique([questionId, order])
@@ -80,4 +91,5 @@ model TestResult {
   passed      Boolean
   answers     String
   createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
