@@ -1762,7 +1762,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
 
       {/* Nom prénom utilisateur - Français */}
       {user && (
-        <div
+        <span
           className="absolute"
           style={{
             bottom: '10.5%',
@@ -1773,22 +1773,24 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
             fontWeight: 'normal',
           }}
         >
-          <span>{user.prenomFr || ''} {user.nomFr || ''}</span>
-          {/* Nom prénom utilisateur - Arabe */}
-          {(user.prenomAr || user.nomAr) && (
-            <div
-              dir="rtl"
-              style={{
-                marginTop: '1rem',
-                marginRight: '0.5rem',
-                fontSize: 'clamp(8px, 1vw, 13px)',
-                color: 'black',
-                fontWeight: 'normal',
-              }}
-            >
-              {user.prenomAr || ''} {user.nomAr || ''}
-            </div>
-          )}
+          {user.prenomFr || ''} {user.nomFr || ''}
+        </span>
+      )}
+      {/* Nom prénom utilisateur - Arabe */}
+      {user && (user.prenomAr || user.nomAr) && (
+        <div
+          dir="rtl"
+          className="absolute"
+          style={{
+            bottom: '6%',
+            right: '12%',
+            zIndex: 20,
+            fontSize: 'clamp(8px, 1vw, 13px)',
+            color: 'black',
+            fontWeight: 'normal',
+          }}
+        >
+          {user.prenomAr || ''} {user.nomAr || ''}
         </div>
       )}
 
