@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
             .map(r => r.order)
             .sort();
           const answerStr = correctResponses.join('');
-          lines.push(`${q.order}${answerStr}`);
+          lines.push(`${q.order} ${answerStr}`);
         }
 
         const reponsesContent = lines.join('\n') + '\n';
