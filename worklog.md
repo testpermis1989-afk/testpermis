@@ -135,3 +135,34 @@ Stage Summary:
 - Visual distinction between accessible (colorful) and non-accessible (grayscale + lock) categories
 - Clicking a non-accessible category shows a red error message for 3 seconds
 - Admin can assign "Toutes les catégories" (ALL) to give a user access to everything
+---
+Task ID: 5
+Agent: Main Agent
+Task: 4 modifications - bouton plein écran, nom utilisateur test, stop série→résultat, reponses.txt ZIP
+
+Work Log:
+- Created reusable `FullscreenButton` component with dynamic SVG icon (enter/exit fullscreen)
+  - Position: top-left (8px, 8px), size: clamp(30px, 3vw, 45px), background: rgba(0,0,0,0.5)
+  - Uses fullscreenchange event listener to toggle icon dynamically
+- Added FullscreenButton to 3 screens: PasswordScreen (PIN), TestScreen, CorrectionScreen
+- Added user name display on TestScreen:
+  - French: bottom 10.5%, right 5%, black, normal weight, font clamp(8px, 1vw, 13px)
+  - Arabic: below French with mt-4 (1rem), marginRight 8.75rem, RTL direction
+- Updated TestScreen props to accept `user: UserData | null`
+- Updated handleStopAndExit to:
+  - Stop audio and timer
+  - Save current answer
+  - Calculate score by comparing all user answers vs correct responses
+  - Call onFinish() instead of onBack() → navigates to result screen
+- Updated reponses.txt generation in /api/admin/download:
+  - Queries DB for questions and correct responses per series
+  - Format: "{questionNumber}{correctAnswers}" (e.g., "12", "3", "14" for multiple)
+  - Mapping: A→1, B→2, C→3, D→4, E→5
+  - Added as reponses.txt in ZIP root
+
+Stage Summary:
+- FullscreenButton component shared across PIN, Test, and Correction screens
+- User first/last name displayed on test screen (FR + AR with RTL)
+- Stop button now calculates score and shows result screen
+- reponses.txt auto-generated from database in ZIP downloads
+- All changes pass ESLint cleanly

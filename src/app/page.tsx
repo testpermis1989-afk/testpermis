@@ -381,6 +381,65 @@ const exitFullscreen = () => {
   }
 };
 
+// ===== COMPOSANT BOUTON PLEIN ÉCRAN =====
+const FullscreenButton = () => {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleChange);
+    document.addEventListener('webkitfullscreenchange', handleChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleChange);
+      document.removeEventListener('webkitfullscreenchange', handleChange);
+    };
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (isFullscreen) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  };
+
+  return (
+    <button
+      onClick={toggleFullscreen}
+      className="absolute flex items-center justify-center rounded-full cursor-pointer transition-opacity hover:opacity-80"
+      style={{
+        top: '8px',
+        left: '8px',
+        width: 'clamp(30px, 3vw, 45px)',
+        height: 'clamp(30px, 3vw, 45px)',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        zIndex: 50,
+      }}
+      title={isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+    >
+      {isFullscreen ? (
+        // Icône quitter plein écran
+        <svg width="60%" height="60%" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+          <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+          <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+          <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+        </svg>
+      ) : (
+        // Icône plein écran
+        <svg width="60%" height="60%" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+          <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+          <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+          <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+        </svg>
+      )}
+    </button>
+  );
+};
+
 // ===== ÉCRAN MOT DE PASSE (NOUVEAU DESIGN) =====
 const PasswordScreen = ({ category, series, userCin, userPin, onSuccess, onBack }: { category: Category; series: number; userCin: string; userPin: string; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
@@ -676,6 +735,9 @@ const PasswordScreen = ({ category, series, userCin, userPin, onSuccess, onBack 
         backgroundRepeat: 'no-repeat'
       }}
     >
+      {/* Bouton Plein Écran */}
+      <FullscreenButton />
+
       {/* N°CIN de l'utilisateur */}
       <div className="absolute flex items-center" style={{ top: '66%', left: '30%' }}>
         <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '1.8vw', fontWeight: 'bold', color: 'white' }}>
@@ -1125,7 +1187,7 @@ interface QuestionData {
   responses: { id: string; order: number; text: string; isCorrect: boolean }[];
 }
 
-const TestScreen = ({ category, series, chronoTime, melangeQuestions, onFinish, onBack }: { category: Category; series: number; chronoTime: number; melangeQuestions?: QuestionData[]; onFinish: (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => void; onBack: () => void }) => {
+const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFinish, onBack }: { category: Category; series: number; chronoTime: number; melangeQuestions?: QuestionData[]; user: UserData | null; onFinish: (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => void; onBack: () => void }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [orientationChecked, setOrientationChecked] = useState(false);
   const [isLandscape, setIsLandscape] = useState(true);
@@ -1336,14 +1398,40 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, onFinish, 
     }
   }, [isMuted, volumeLevel]);
 
-  // Wa9ef audio w7ed les ressources quand kharjina mn l'écran
+  // Stop la série → calculer le score et afficher l'écran résultat
   const handleStopAndExit = () => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
-    onBack();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setChronoActive(false);
+
+    // Sauvegarder la réponse en cours
+    const finalAnswers = [...allUserAnswers];
+    finalAnswers[currentQuestion] = [...selectedAnswers];
+
+    // Calculer le score
+    let correctCount = 0;
+    questions.forEach((q, idx) => {
+      const userAns = finalAnswers[idx] || [];
+      const correctResp = q.responses.filter(r => r.isCorrect).map(r => r.order).sort();
+      const userSorted = [...userAns].sort();
+      if (JSON.stringify(userSorted) === JSON.stringify(correctResp)) {
+        correctCount++;
+      }
+    });
+
+    onFinish({
+      questions: questions,
+      userAnswers: finalAnswers,
+      score: correctCount,
+      total: questions.length
+    });
   };
 
   // Précharger les images des boutons
@@ -1647,6 +1735,41 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, onFinish, 
         backgroundRepeat: 'no-repeat'
       }}
     >
+      {/* Bouton Plein Écran */}
+      <FullscreenButton />
+
+      {/* Nom prénom utilisateur - Français */}
+      {user && (
+        <div
+          className="absolute"
+          style={{
+            bottom: '10.5%',
+            right: '5%',
+            zIndex: 20,
+            fontSize: 'clamp(8px, 1vw, 13px)',
+            color: 'black',
+            fontWeight: 'normal',
+          }}
+        >
+          <span>{user.prenomFr || ''} {user.nomFr || ''}</span>
+          {/* Nom prénom utilisateur - Arabe */}
+          {(user.prenomAr || user.nomAr) && (
+            <div
+              dir="rtl"
+              style={{
+                marginTop: '1rem',
+                marginRight: '8.75rem',
+                fontSize: 'clamp(8px, 1vw, 13px)',
+                color: 'black',
+                fontWeight: 'normal',
+              }}
+            >
+              {user.prenomAr || ''} {user.nomAr || ''}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Zone noire pour afficher l'image/vidéo de la question */}
       <div
         className="absolute bg-black border-[6px] border-white"
@@ -1982,6 +2105,9 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
 
   return (
     <div className="fixed inset-0 w-screen h-screen bg-gray-900 flex flex-col">
+      {/* Bouton Plein Écran */}
+      <FullscreenButton />
+
       {/* Header */}
       <div className="flex items-center justify-between px-[2vw] py-[1vh] bg-gray-800 shrink-0">
         <button onClick={onBack} className="bg-gray-600 hover:bg-gray-500 text-white px-[2vw] py-[0.5vh] rounded font-bold" style={{ fontSize: 'clamp(11px, 1.3vw, 16px)' }}>
@@ -4222,7 +4348,7 @@ export default function DrivingTestApp() {
       {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onMelange={handleMelange} onBack={handleGoHome} />}
       {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} userCin={currentUser?.cin || ''} userPin={currentUser?.pinCode || ''} onSuccess={handlePasswordSuccess} onBack={() => setScreen('series')} />}
       {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} />}
-      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} onFinish={handleFinishTest} onBack={() => setScreen('series')} />}
+      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} user={currentUser} onFinish={handleFinishTest} onBack={() => setScreen('series')} />}
       {screen === "result" && selectedCategory && testResult && <ResultScreen score={testResult.score} total={testResult.total} onRestart={handleRestart} onHome={handleGoHome} onCorrection={() => setScreen('correction')} />}
       {screen === "correction" && selectedCategory && testResult && <CorrectionScreen questions={testResult.questions} userAnswers={testResult.userAnswers} onBack={() => setScreen('result')} />}
       {screen === "admin" && <AdminPanel onBack={handleLogout} />}

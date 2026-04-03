@@ -3,6 +3,16 @@ import { readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
+import { db } from '@/lib/db';
+
+// Mapping catégorie lettre → numéro (A→1, B→2, C→3, D→4, E→5)
+const categoryToNumber: Record<string, string> = {
+  A: '1',
+  B: '2',
+  C: '3',
+  D: '4',
+  E: '5',
+};
 
 // POST /api/admin/download - Download a series as ZIP
 export async function POST(request: NextRequest) {
@@ -39,13 +49,60 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Also add the TXT file if exists
-    const txtFiles = (await readdir(uploadDir)).filter(f => f.endsWith('.txt'));
+    // Also add existing TXT files (skip reponses.txt if already exists, we'll regenerate it)
+    const txtFiles = (await readdir(uploadDir)).filter(f => f.endsWith('.txt') && f !== 'reponses.txt');
     for (const txt of txtFiles) {
       try {
         zip.addLocalFile(path.join(uploadDir, txt));
         totalFiles++;
       } catch {}
+    }
+
+    // Generate reponses.txt from database
+    try {
+      const category = await db.category.findUnique({
+        where: { code: categoryCode },
+        include: {
+          series: {
+            where: { number: parseInt(serieNumber) },
+            include: {
+              questions: {
+                include: { responses: true },
+                orderBy: { order: 'asc' },
+              },
+            },
+          },
+        },
+      });
+
+      if (category && category.series.length > 0) {
+        const serie = category.series[0];
+        const catNum = categoryToNumber[categoryCode] || categoryCode;
+        const lines: string[] = [];
+
+        for (const q of serie.questions) {
+          const correctResponses = q.responses
+            .filter(r => r.isCorrect)
+            .map(r => r.order)
+            .sort();
+          const answerStr = correctResponses.join('');
+          lines.push(`${q.order}${answerStr}`);
+        }
+
+        const reponsesContent = lines.join('\n') + '\n';
+        zip.addFile('reponses.txt', Buffer.from(reponsesContent, 'utf-8'));
+        totalFiles++;
+      }
+    } catch (dbError) {
+      console.error('Error generating reponses.txt from DB:', dbError);
+      // Fallback: try to find existing reponses.txt in uploadDir
+      const existingReponses = path.join(uploadDir, 'reponses.txt');
+      if (existsSync(existingReponses)) {
+        try {
+          zip.addLocalFile(existingReponses);
+          totalFiles++;
+        } catch {}
+      }
     }
 
     if (totalFiles === 0) {
