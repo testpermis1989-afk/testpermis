@@ -775,7 +775,7 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
         <div
           className="absolute overflow-hidden"
           style={{
-            top: isFullscreen ? '14.5%' : '11%',
+            top: isFullscreen ? '15%' : '11%',
             left: '18%',
             width: 'clamp(120px, 30vw, 450px)',
             height: 'clamp(88px, 22vw, 330px)',
