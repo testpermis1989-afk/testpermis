@@ -764,7 +764,7 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
           className="absolute overflow-hidden"
           style={{
             top: '10%',
-            left: '15%',
+            left: '18%',
             width: '30vw',
             height: '22vw',
             borderRadius: '12px',
