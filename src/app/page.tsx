@@ -765,8 +765,8 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
           style={{
             top: '10%',
             left: '18%',
-            width: '30vw',
-            height: '22vw',
+            width: 'clamp(120px, 30vw, 450px)',
+            height: 'clamp(88px, 22vw, 330px)',
             borderRadius: '12px',
             border: '2px solid transparent',
           }}
