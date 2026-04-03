@@ -25,8 +25,9 @@ export async function GET() {
 
     return NextResponse.json({ users })
   } catch (error) {
+    console.error('GET users error:', error)
     return NextResponse.json(
-      { error: 'Erreur serveur' },
+      { error: 'Erreur serveur: ' + String(error) },
       { status: 500 }
     )
   }
@@ -71,15 +72,15 @@ export async function POST(request: NextRequest) {
       data: {
         cin,
         password: password || '1234',
-        nomFr: nomFr ?? undefined,
-        prenomFr: prenomFr ?? undefined,
-        nomAr: nomAr ?? undefined,
-        prenomAr: prenomAr ?? undefined,
-        photo: photo ?? undefined,
-        permisCategory: permisCategory ?? 'B',
-        examDate: examDate ?? undefined,
-        pinCode: pinCode ?? '',
-        isActive: isActive ?? true,
+        nomFr: nomFr || null,
+        prenomFr: prenomFr || null,
+        nomAr: nomAr || null,
+        prenomAr: prenomAr || null,
+        photo: photo || null,
+        permisCategory: permisCategory || 'B',
+        examDate: examDate || null,
+        pinCode: pinCode || '',
+        isActive: isActive !== undefined ? isActive : true,
       },
     })
 
@@ -87,8 +88,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ user: userWithoutPassword }, { status: 201 })
   } catch (error) {
+    console.error('POST users error:', error)
     return NextResponse.json(
-      { error: 'Erreur serveur' },
+      { error: 'Erreur serveur: ' + String(error) },
       { status: 500 }
     )
   }

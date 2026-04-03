@@ -82,3 +82,56 @@ Stage Summary:
 - Download button (📥) remains — downloads series files as ZIP via /api/admin/download
 - Compress-before-import flow still works in the import modal
 - Compression API endpoints (/api/admin/compress, /api/admin/download) remain available
+---
+Task ID: 1
+Agent: Main Agent
+Task: Add photo upload to user creation form in admin panel
+
+Work Log:
+- Checked Prisma schema - User table exists with photo field
+- Ran `bun run db:push` - DB already in sync
+- Ensured `public/uploads/photos/` directory exists
+- Added `formPhoto`, `formPhotoFile`, `formPhotoUploading` state variables
+- Added `handlePhotoSelect()` and `handleRemovePhoto()` handler functions
+- Modified `handleSaveUser()` to upload photo first via `/api/upload/photo`, then include URL in user creation/edit body
+- Updated `handleEditUser()` to set form photo from existing user data
+- Updated `resetUserForm()` to clear photo states
+- Added photo upload UI section at top of user form: circular preview, choose/change/remove buttons, file name display
+- Updated save button with loading state for photo upload
+- Verified PUT `/api/users/[cin]` already supports photo field
+- Ran `bun run lint` - no errors
+- Checked dev logs - compilation successful, API endpoints returning 200
+
+Stage Summary:
+- Photo upload is now fully integrated in admin user creation/edit form
+- Photo is uploaded to `/api/upload/photo` as multipart form data (saved to `public/uploads/photos/{cin}.{ext}`)
+- Photo URL is then included in the user JSON body sent to create/update API
+- User can preview, choose, change, or remove photo before saving
+- Loading spinner shown during photo upload
+---
+Task ID: 2
+Agent: Main Agent
+Task: Ajouter le contrôle d'accès par catégorie - afficher toutes les catégories mais bloquer l'accès avec message
+
+Work Log:
+- Verified "Toutes les catégories" (value="ALL") already exists in admin panel category select
+- Modified CategoriesScreen to show ALL 5 categories instead of filtering
+- Added `hasCategoryAccess()` function checking user's permisCategory against access rules:
+  - ALL → all categories accessible
+  - A → A and B accessible
+  - B → B only
+  - C → C and B accessible
+  - D → D and B accessible
+  - E → E and B accessible
+- Added `handleCategoryClick()` that checks access before allowing navigation
+- Added `accessDeniedMsg` state with auto-dismiss after 3 seconds
+- Added red alert popup message: "Vous n'avez pas le droit d'accéder à la catégorie X" (FR + AR)
+- Non-accessible categories shown with: grayscale icon, lock emoji (🔒), reduced opacity, "Non accessible" text
+- Accessible categories shown normally with full color and ▶ button
+- Lint passes clean, dev server compiles successfully
+
+Stage Summary:
+- All 5 categories are always visible on the categories screen
+- Visual distinction between accessible (colorful) and non-accessible (grayscale + lock) categories
+- Clicking a non-accessible category shows a red error message for 3 seconds
+- Admin can assign "Toutes les catégories" (ALL) to give a user access to everything

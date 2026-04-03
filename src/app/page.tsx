@@ -140,6 +140,26 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
 // ===== ÉCRAN DES CATÉGORIES =====
 const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { user: UserData | null; onSelectCategory: (cat: Category) => void; onLogout: () => void; onProfile: () => void }) => {
   const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [accessDeniedMsg, setAccessDeniedMsg] = useState<string | null>(null);
+
+  // Vérifier si l'utilisateur a accès à une catégorie
+  const hasCategoryAccess = (catId: string): boolean => {
+    if (!user) return false;
+    const pc = user.permisCategory;
+    if (pc === 'ALL') return true;
+    if (catId === pc || catId === 'B') return true;
+    return false;
+  };
+
+  // Gérer le clic sur une catégorie
+  const handleCategoryClick = (cat: Category) => {
+    if (hasCategoryAccess(cat.id)) {
+      onSelectCategory(cat);
+    } else {
+      setAccessDeniedMsg(cat.id);
+      setTimeout(() => setAccessDeniedMsg(null), 3000);
+    }
+  };
 
   // Précharger les images des catégories
   useEffect(() => {
@@ -205,19 +225,51 @@ const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { use
           <div className="h-1 bg-yellow-500 mx-auto w-3/4 max-w-xl rounded-full shadow-lg" />
           <p className="text-gray-700 text-lg mt-2">Test du Permis de Conduire - Maroc</p>
         </div>
+        {/* Message d'accès refusé */}
+        {accessDeniedMsg && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
+            <div className="bg-red-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 border-2 border-red-400">
+              <span className="text-2xl">🚫</span>
+              <div>
+                <p className="font-bold text-sm">Accès refusé!</p>
+                <p className="text-xs opacity-90">Vous n'avez pas le droit d'accéder à la catégorie {accessDeniedMsg}</p>
+                <p className="text-xs opacity-75 mt-0.5" dir="rtl">ليس لديك الحق في الوصول إلى الفئة {accessDeniedMsg}</p>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto px-4 pb-4">
           <div className="max-w-5xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {categoriesData.map((cat) => (
-              <button key={cat.id} onClick={() => onSelectCategory(cat)} className="bg-white/90 rounded-xl p-4 shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] group border-2 border-gray-300 flex flex-col items-center">
-                <div className="w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg group-hover:scale-110 transition-all mb-2" style={{ backgroundColor: cat.color }}>{cat.id}</div>
-                <div className="w-full h-36 relative mb-2 transition-transform duration-200 group-hover:scale-105">
-                  <Image src={cat.image} alt={cat.name} fill className="object-contain p-2 transition-all duration-200 group-hover:scale-110 group-hover:brightness-110 brightness-105" />
-                </div>
-                <p className="text-lg font-bold text-gray-800">{cat.name}</p>
-                <p className="text-gray-600 text-sm" dir="rtl">{cat.nameAr}</p>
-                <div className="mt-2 text-red-500 text-lg">▶</div>
-              </button>
-            ))}
+            {categoriesData.map((cat) => {
+              const hasAccess = hasCategoryAccess(cat.id);
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => handleCategoryClick(cat)}
+                  className={`rounded-xl p-4 shadow-lg transition-all hover:scale-[1.02] group border-2 flex flex-col items-center relative ${
+                    hasAccess
+                      ? 'bg-white/90 hover:shadow-xl border-gray-300 cursor-pointer'
+                      : 'bg-gray-200/70 border-gray-400 opacity-60 cursor-not-allowed hover:opacity-75'
+                  }`}
+                >
+                  {/* Indicateur verrouillé pour catégories non accessibles */}
+                  {!hasAccess && (
+                    <div className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-md">🔒</div>
+                  )}
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg group-hover:scale-110 transition-all mb-2 ${!hasAccess ? 'grayscale' : ''}`} style={{ backgroundColor: cat.color }}>{cat.id}</div>
+                  <div className="w-full h-36 relative mb-2 transition-transform duration-200 group-hover:scale-105">
+                    <Image src={cat.image} alt={cat.name} fill className={`object-contain p-2 transition-all duration-200 ${hasAccess ? 'group-hover:scale-110 group-hover:brightness-110 brightness-105' : 'grayscale opacity-50'}`} />
+                  </div>
+                  <p className={`text-lg font-bold ${hasAccess ? 'text-gray-800' : 'text-gray-500'}`}>{cat.name}</p>
+                  <p className={`text-sm ${hasAccess ? 'text-gray-600' : 'text-gray-400'}`} dir="rtl">{cat.nameAr}</p>
+                  {hasAccess ? (
+                    <div className="mt-2 text-red-500 text-lg">▶</div>
+                  ) : (
+                    <div className="mt-2 text-gray-400 text-xs">🔒 Non accessible</div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="text-center py-2 text-gray-500 text-sm">المملكة المغربية - Royaume du Maroc</div>
@@ -2173,7 +2225,7 @@ const UserProfileScreen = ({ user, onBack, onLogout }: { user: UserData; onBack:
             <div>
               <p className="font-bold text-gray-800 text-lg">{user.prenomFr} {user.nomFr}</p>
               <p className="text-gray-600 text-sm" dir="rtl">{user.prenomAr} {user.nomAr}</p>
-              <p className="text-gray-500 text-xs mt-1">N°CIN: {user.cin} | Catégorie: {user.permisCategory}</p>
+              <p className="text-gray-500 text-xs mt-1">N°CIN: {user.cin} | Catégorie: {user.permisCategory === 'ALL' ? 'Toutes' : user.permisCategory}</p>
               {user.examDate && <p className="text-blue-600 text-xs">📅 Examen: {user.examDate}</p>}
             </div>
           </div>
@@ -2227,13 +2279,67 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   const [formExamDate, setFormExamDate] = useState('');
   const [formPin, setFormPin] = useState('');
   const [formPassword, setFormPassword] = useState('');
+  const [formPhoto, setFormPhoto] = useState<string | null>(null);
+  const [formPhotoFile, setFormPhotoFile] = useState<File | null>(null);
+  const [formPhotoOriginalSize, setFormPhotoOriginalSize] = useState(0);
+  const [formPhotoUploading, setFormPhotoUploading] = useState(false);
   const [formMessage, setFormMessage] = useState('');
   const [formMsgType, setFormMsgType] = useState<'success' | 'error'>('success');
 
   const resetUserForm = () => {
     setFormCin(''); setFormNomFr(''); setFormPrenomFr(''); setFormNomAr('');
     setFormPrenomAr(''); setFormCategory('B'); setFormExamDate(''); setFormPin('');
-    setFormPassword(''); setFormMessage(''); setEditingUser(null);
+    setFormPassword(''); setFormPhoto(null); setFormPhotoFile(null);
+    setFormPhotoOriginalSize(0); setFormPhotoUploading(false); setFormMessage(''); setEditingUser(null);
+  };
+
+  const compressImage = (file: File, maxSize: number = 300, quality: number = 0.7): Promise<{ blob: Blob; dataUrl: string }> => {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        // Resize proportionally to fit maxSize
+        if (w > h) { if (w > maxSize) { h = Math.round(h * maxSize / w); w = maxSize; } }
+        else { if (h > maxSize) { w = Math.round(w * maxSize / h); h = maxSize; } }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas not supported')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (!blob) { reject(new Error('Compression failed')); return; }
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ blob, dataUrl });
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => reject(new Error('Image load failed'));
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const origSize = file.size;
+    setFormPhotoOriginalSize(origSize);
+    try {
+      const { blob, dataUrl } = await compressImage(file, 300, 0.7);
+      setFormPhoto(dataUrl);
+      setFormPhotoFile(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+    } catch {
+      setFormPhotoFile(file);
+      setFormPhotoOriginalSize(0);
+      const reader = new FileReader();
+      reader.onload = () => setFormPhoto(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setFormPhoto(null);
+    setFormPhotoFile(null);
+    setFormPhotoOriginalSize(0);
   };
 
   const fetchUsers = async () => {
@@ -2250,6 +2356,23 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     if (!formCin.trim()) { setFormMessage('N°CIN est obligatoire'); setFormMsgType('error'); return; }
     setSavingUser(true); setFormMessage('');
     try {
+      // Upload photo first if a new file was selected
+      let photoUrl = editingUser?.photo || null;
+      if (formPhotoFile) {
+        setFormPhotoUploading(true);
+        const formData = new FormData();
+        formData.append('file', formPhotoFile);
+        formData.append('cin', formCin.trim());
+        const uploadRes = await fetch('/api/upload/photo', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        setFormPhotoUploading(false);
+        if (uploadRes.ok && uploadData.photo) {
+          photoUrl = uploadData.photo;
+        } else {
+          setFormMessage(uploadData.error || 'Erreur upload photo'); setFormMsgType('error'); setSavingUser(false); return;
+        }
+      }
+
       const body: any = {
         cin: formCin.trim(),
         nomFr: formNomFr || null,
@@ -2259,6 +2382,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         permisCategory: formCategory,
         examDate: formExamDate || null,
         pinCode: formPin,
+        photo: photoUrl,
       };
       if (!editingUser && formPassword) body.password = formPassword;
 
@@ -2271,7 +2395,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       if (!editingUser) resetUserForm();
       fetchUsers();
     } catch { setFormMessage('Erreur serveur'); setFormMsgType('error'); }
-    finally { setSavingUser(false); }
+    finally { setSavingUser(false); setFormPhotoUploading(false); }
   };
 
   const handleEditUser = (u: UserData) => {
@@ -2280,6 +2404,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setFormNomAr(u.nomAr || ''); setFormPrenomAr(u.prenomAr || '');
     setFormCategory(u.permisCategory); setFormExamDate(u.examDate || '');
     setFormPin(u.pinCode || ''); setFormPassword(''); setFormMessage('');
+    setFormPhoto(u.photo); setFormPhotoFile(null);
     setShowUserForm(true);
   };
 
@@ -3693,6 +3818,44 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
               {/* Formulaire utilisateur */}
               {showUserForm && (
                 <div className="bg-gray-800 rounded-lg p-4 mb-4 border border-gray-600">
+                  {/* Photo upload */}
+                  <div className="flex items-center gap-4 mb-4 p-3 bg-gray-700/50 rounded-lg">
+                    <div className="relative">
+                      {formPhoto ? (
+                        <img src={formPhoto} alt="Photo" className="w-16 h-16 rounded-full object-cover border-2 border-gray-500" />
+                      ) : (
+                        <div className="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-2xl border-2 border-gray-500">👤</div>
+                      )}
+                      {formPhotoUploading && (
+                        <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                          <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-gray-300 text-xs mb-1 font-bold">📷 Photo de l'utilisateur</label>
+                      <div className="flex gap-2">
+                        <label className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold cursor-pointer transition-colors">
+                          {formPhotoFile ? '📷 Changer' : '📷 Choisir'}
+                          <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+                        </label>
+                        {formPhoto && (
+                          <button onClick={handleRemovePhoto} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold transition-colors">🗑️ Supprimer</button>
+                        )}
+                      </div>
+                      {formPhotoFile && (
+                        <p className="text-gray-400 text-xs mt-1 truncate max-w-[200px]">{formPhotoFile.name}</p>
+                      )}
+                      {formPhotoFile && formPhotoOriginalSize > 0 && (
+                        <p className="text-green-400 text-xs mt-0.5">
+                          🗜️ {(formPhotoOriginalSize / 1024).toFixed(0)} KB → {(formPhotoFile.size / 1024).toFixed(0)} KB
+                          {formPhotoOriginalSize > formPhotoFile.size && (
+                            <span className="text-green-300"> (−{Math.round((1 - formPhotoFile.size / formPhotoOriginalSize) * 100)}%)</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
                     <div>
                       <label className="block text-gray-300 text-xs mb-1">N°CIN *</label>
@@ -3718,6 +3881,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                       <label className="block text-gray-300 text-xs mb-1">Catégorie permis</label>
                       <select value={formCategory} onChange={e => setFormCategory(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm">
                         {['A','B','C','D','E'].map(c => <option key={c} value={c}>{c}</option>)}
+                        <option key="ALL" value="ALL">Toutes les catégories</option>
                       </select>
                     </div>
                     <div>
@@ -3739,10 +3903,15 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                     <div className={`px-3 py-1 rounded text-sm mb-2 ${formMsgType === 'success' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{formMessage}</div>
                   )}
                   <div className="flex gap-2">
-                    <button onClick={handleSaveUser} disabled={savingUser} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">
-                      {savingUser ? '...' : (editingUser ? '💾 Modifier' : '➕ Créer')}
+                    <button onClick={handleSaveUser} disabled={savingUser || formPhotoUploading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm disabled:opacity-50">
+                      {savingUser || formPhotoUploading ? (
+                        <span className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          {formPhotoUploading ? 'Upload photo...' : 'Enregistrement...'}
+                        </span>
+                      ) : (editingUser ? '💾 Modifier' : '➕ Créer')}
                     </button>
-                    <button onClick={() => { setShowUserForm(false); resetUserForm(); }} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm">Annuler</button>
+                    <button onClick={() => { setShowUserForm(false); resetUserForm(); }} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm" disabled={savingUser || formPhotoUploading}>Annuler</button>
                   </div>
                 </div>
               )}
@@ -3781,7 +3950,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                           <td className="px-3 py-2 text-white font-mono">{u.cin}</td>
                           <td className="px-3 py-2 text-white">{u.prenomFr} {u.nomFr}</td>
                           <td className="px-3 py-2 text-white" dir="rtl">{u.prenomAr} {u.nomAr}</td>
-                          <td className="px-3 py-2"><span className="bg-blue-600 px-2 py-0.5 rounded text-white text-xs font-bold">{u.permisCategory}</span></td>
+                          <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded text-white text-xs font-bold ${u.permisCategory === 'ALL' ? 'bg-gradient-to-r from-green-600 to-emerald-600' : 'bg-blue-600'}`}>{u.permisCategory === 'ALL' ? 'Toutes' : u.permisCategory}</span></td>
                           <td className="px-3 py-2 text-gray-300 text-xs">{u.examDate || '-'}</td>
                           <td className="px-3 py-2 text-gray-300 text-xs">{u.pinCode || <span className="text-green-400">Libre</span>}</td>
                           <td className="px-3 py-2 text-center">
