@@ -383,22 +383,39 @@ const exitFullscreen = () => {
 
 // ===== COMPOSANT BOUTON PLEIN ÉCRAN =====
 const FullscreenButton = () => {
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(() => {
+    // Initialiser selon l'état actuel au montage
+    if (typeof document !== 'undefined') {
+      return !!document.fullscreenElement;
+    }
+    return false;
+  });
 
   useEffect(() => {
     const handleChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
+    // Écouter tous les événements possibles
     document.addEventListener('fullscreenchange', handleChange);
     document.addEventListener('webkitfullscreenchange', handleChange);
+    document.addEventListener('mozfullscreenchange', handleChange);
+    document.addEventListener('MSFullscreenChange', handleChange);
     return () => {
       document.removeEventListener('fullscreenchange', handleChange);
       document.removeEventListener('webkitfullscreenchange', handleChange);
+      document.removeEventListener('mozfullscreenchange', handleChange);
+      document.removeEventListener('MSFullscreenChange', handleChange);
     };
   }, []);
 
   const toggleFullscreen = () => {
-    if (isFullscreen) {
+    // Vérifier l'état réel au moment du clic (pas le state)
+    const currentlyFullscreen = !!document.fullscreenElement
+      || !!(document as unknown as { webkitFullscreenElement: Element | null }).webkitFullscreenElement
+      || !!(document as unknown as { mozFullScreenElement: Element | null }).mozFullScreenElement
+      || !!(document as unknown as { msFullscreenElement: Element | null }).msFullscreenElement;
+
+    if (currentlyFullscreen) {
       exitFullscreen();
     } else {
       enterFullscreen();
