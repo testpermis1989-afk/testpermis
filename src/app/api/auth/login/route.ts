@@ -13,6 +13,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Fallback: si aucun admin dans la DB, permettre admin/admin123
+    if (cin.toLowerCase() === 'admin' && password === 'admin123') {
+      const adminCount = await db.user.count({ where: { role: 'admin' } });
+      if (adminCount === 0) {
+        return NextResponse.json({
+          user: {
+            id: 'fallback-admin',
+            cin: 'ADMIN',
+            nomFr: 'Administrateur',
+            prenomFr: 'Système',
+            nomAr: null,
+            prenomAr: null,
+            photo: null,
+            permisCategory: 'ALL',
+            examDate: null,
+            pinCode: '',
+            isActive: true,
+            role: 'admin',
+          },
+        })
+      }
+    }
+
     const user = await db.user.findUnique({
       where: { cin },
     })
