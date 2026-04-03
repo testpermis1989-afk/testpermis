@@ -1766,7 +1766,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
           className="absolute"
           style={{
             bottom: '10.5%',
-            right: '1%',
+            right: '2%',
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
             color: 'black',
