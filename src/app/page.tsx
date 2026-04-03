@@ -183,7 +183,7 @@ const CategoriesScreen = ({ userRole, onSelectCategory, onLogout }: { userRole: 
 };
 
 // ===== ÉCRAN SÉLECTION SÉRIE =====
-const SeriesScreen = ({ category, onSelectSeries, onBack }: { category: Category; onSelectSeries: (series: number, chronoTime: number) => void; onBack: () => void }) => {
+const SeriesScreen = ({ category, onSelectSeries, onMelange, onBack }: { category: Category; onSelectSeries: (series: number, chronoTime: number) => void; onMelange: (chronoTime: number) => void; onBack: () => void }) => {
   const [existingSeries, setExistingSeries] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [chronoTime, setChronoTime] = useState(15);
@@ -244,6 +244,18 @@ const SeriesScreen = ({ category, onSelectSeries, onBack }: { category: Category
             </div>
           </div>
           <h3 className="text-center text-gray-700 text-xl mb-4">اختر السلسلة - Choisissez une série</h3>
+
+          {/* Bouton Mélange */}
+          <div className="flex justify-center mb-4">
+            <button
+              onClick={() => onMelange(chronoTime)}
+              className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:scale-105 transition-all"
+            >
+              <span style={{ fontSize: 'clamp(18px, 2.5vw, 26px)' }}>🔀</span>
+              <span>مزيج - Mélange</span>
+            </button>
+          </div>
+
           {existingSeries.length > 0 ? (
             <div className="grid grid-cols-5 md:grid-cols-10 gap-3">
               {existingSeries.map((num) => (
@@ -1022,7 +1034,7 @@ interface QuestionData {
   responses: { id: string; order: number; text: string; isCorrect: boolean }[];
 }
 
-const TestScreen = ({ category, series, chronoTime, onFinish, onBack }: { category: Category; series: number; chronoTime: number; onFinish: (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => void; onBack: () => void }) => {
+const TestScreen = ({ category, series, chronoTime, melangeQuestions, onFinish, onBack }: { category: Category; series: number; chronoTime: number; melangeQuestions?: QuestionData[]; onFinish: (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => void; onBack: () => void }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [orientationChecked, setOrientationChecked] = useState(false);
   const [isLandscape, setIsLandscape] = useState(true);
@@ -1046,20 +1058,25 @@ const TestScreen = ({ category, series, chronoTime, onFinish, onBack }: { catego
   useEffect(() => {
     const fetchQuestions = async () => {
       try {
-        const res = await fetch(`/api/questions?category=${category.id}&serie=${series}`);
-        if (!res.ok) {
-          console.error('Error loading questions:', res.status, res.statusText);
-          return;
-        }
-        const data = await res.json();
-        if (data.questions) {
-          // Mélanger les questions au hasard (Fisher-Yates)
-          const shuffled = [...data.questions];
-          for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        if (melangeQuestions && melangeQuestions.length > 0) {
+          // Questions mélangées déjà fournies
+          setQuestions(melangeQuestions);
+        } else {
+          const res = await fetch(`/api/questions?category=${category.id}&serie=${series}`);
+          if (!res.ok) {
+            console.error('Error loading questions:', res.status, res.statusText);
+            return;
           }
-          setQuestions(shuffled);
+          const data = await res.json();
+          if (data.questions) {
+            // Mélanger les questions au hasard (Fisher-Yates)
+            const shuffled = [...data.questions];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            setQuestions(shuffled);
+          }
         }
       } catch (error) {
         console.error('Error loading questions:', error);
@@ -3478,26 +3495,42 @@ export default function DrivingTestApp() {
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [selectedSeries, setSelectedSeries] = useState<number>(1);
   const [selectedChronoTime, setSelectedChronoTime] = useState<number>(15);
+  const [melangeQuestions, setMelangeQuestions] = useState<QuestionData[] | null>(null);
 
   const handleLogin = (role: UserRole) => { setUserRole(role); setScreen(role === "admin" ? "admin" : "categories"); };
   const handleLogout = () => { setUserRole(null); setScreen("login"); setSelectedCategory(null); };
   const handleSelectCategory = (cat: Category) => { setSelectedCategory(cat); setScreen("series"); };
-  const handleSelectSeries = (series: number, chronoTime: number) => { setSelectedSeries(series); setSelectedChronoTime(chronoTime); setScreen("password"); };
+  const handleSelectSeries = (series: number, chronoTime: number) => { setMelangeQuestions(null); setSelectedSeries(series); setSelectedChronoTime(chronoTime); setScreen("password"); };
+  const handleMelange = async (chronoTime: number) => {
+    if (!selectedCategory) return;
+    setSelectedChronoTime(chronoTime);
+    try {
+      const res = await fetch(`/api/questions/melange?category=${selectedCategory.id}`);
+      const data = await res.json();
+      if (data.questions && data.questions.length > 0) {
+        setMelangeQuestions(data.questions);
+        setSelectedSeries(0); // série 0 = mélange
+        setScreen("password");
+      }
+    } catch (error) {
+      console.error('Error fetching melange questions:', error);
+    }
+  };
   const handlePasswordSuccess = () => { setScreen("counter"); };
   const handleCounterStart = () => { setScreen("test"); };
   const [testResult, setTestResult] = useState<{ questions: QuestionData[]; userAnswers: number[][]; score: number; total: number } | null>(null);
   const handleFinishTest = (result: { questions: QuestionData[]; userAnswers: number[][]; score: number; total: number }) => { setTestResult(result); setScreen("result"); };
   const handleRestart = () => { setScreen("password"); };
-  const handleGoHome = () => { setScreen("categories"); setSelectedCategory(null); };
+  const handleGoHome = () => { setScreen("categories"); setSelectedCategory(null); setMelangeQuestions(null); };
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "Arial, sans-serif" }}>
       {screen === "login" && <LoginScreen onLogin={handleLogin} />}
       {screen === "categories" && <CategoriesScreen userRole={userRole} onSelectCategory={handleSelectCategory} onLogout={handleLogout} />}
-      {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onBack={handleGoHome} />}
+      {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onMelange={handleMelange} onBack={handleGoHome} />}
       {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} onSuccess={handlePasswordSuccess} onBack={() => setScreen("series")} />}
       {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} />}
-      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} onFinish={handleFinishTest} onBack={() => setScreen("series")} />}
+      {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} onFinish={handleFinishTest} onBack={() => setScreen("series")} />}
       {screen === "result" && selectedCategory && testResult && <ResultScreen score={testResult.score} total={testResult.total} onRestart={handleRestart} onHome={handleGoHome} onCorrection={() => setScreen("correction")} />}
       {screen === "correction" && selectedCategory && testResult && <CorrectionScreen questions={testResult.questions} userAnswers={testResult.userAnswers} onBack={() => setScreen("result")} />}
       {screen === "admin" && <AdminPanel onBack={handleLogout} />}
