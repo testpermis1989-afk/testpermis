@@ -95,6 +95,7 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 flex items-center justify-center p-4">
+      <FullscreenButton />
       <RoadSignsBackground />
       <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-6">
@@ -197,6 +198,7 @@ const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { use
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 relative overflow-hidden">
+      <FullscreenButton />
       <RoadSignsBackground />
       <div className="absolute inset-2 md:inset-4 border-2 md:border-4 border-gray-500 rounded-lg bg-gray-300/80 shadow-inner flex flex-col">
         <div className="bg-gray-500 text-white px-4 py-2 flex justify-between items-center rounded-t-lg">
@@ -312,6 +314,7 @@ const SeriesScreen = ({ category, onSelectSeries, onMelange, onBack }: { categor
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 p-4">
+      <FullscreenButton />
       <div className="max-w-4xl mx-auto">
         <div className="bg-gray-500 text-white px-4 py-3 rounded-t-lg flex justify-between items-center">
           <div className="flex items-center gap-4">
@@ -1189,7 +1192,9 @@ const CounterScreen = ({ category, series, onStart }: { category: Category; seri
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat'
       }}
-    />
+    >
+      <FullscreenButton />
+    </div>
   );
 };
 
@@ -2051,6 +2056,7 @@ const ResultScreen = ({ score, total, onRestart, onHome, onCorrection }: { score
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 flex items-center justify-center p-4">
+      <FullscreenButton />
       <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md w-full text-center">
         <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 ${passed ? 'bg-green-100' : 'bg-red-100'}`}>
           <span className={`text-4xl ${passed ? 'text-green-500' : 'text-red-500'}`}>{passed ? '✓' : '✗'}</span>
@@ -2340,6 +2346,7 @@ const UserProfileScreen = ({ user, onBack, onLogout }: { user: UserData; onBack:
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 p-4">
+      <FullscreenButton />
       <div className="max-w-lg mx-auto">
         <div className="bg-gray-500 text-white px-4 py-3 rounded-t-lg flex justify-between items-center">
           <button onClick={onBack} className="bg-gray-600 hover:bg-gray-700 px-4 py-1 rounded font-bold">← Retour</button>
@@ -3211,6 +3218,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-800 via-gray-900 to-black p-4">
+      <FullscreenButton />
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="bg-gray-700 text-white px-4 py-3 rounded-t-lg flex justify-between items-center">
