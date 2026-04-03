@@ -176,25 +176,16 @@ const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { use
       img.src = cat.image;
     });
     
-    // Timeout de sécurité - afficher après 2 secondes max
+    // Timeout de sécurité - afficher après 500ms max
     const timeout = setTimeout(() => {
       setImagesLoaded(true);
-    }, 2000);
+    }, 500);
     
     return () => clearTimeout(timeout);
   }, []);
 
-  // Afficher un chargement léger
-  if (!imagesLoaded) {
-    return (
-      <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-gray-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-gray-600 text-sm">Chargement...</p>
-        </div>
-      </div>
-    );
-  }
+  // Afficher directement les catégories (images chargées en eager)
+  // Pas de spinner - les images s'affichent au fur et à mesure
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-gray-300 via-gray-400 to-gray-300 relative overflow-hidden">
@@ -252,7 +243,7 @@ const CategoriesScreen = ({ user, onSelectCategory, onLogout, onProfile }: { use
                   )}
                   <div className={`w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg group-hover:scale-110 transition-all mb-2 ${!hasAccess ? 'grayscale' : ''}`} style={{ backgroundColor: cat.color }}>{cat.id}</div>
                   <div className="w-full h-36 relative mb-2 transition-transform duration-200 group-hover:scale-105">
-                    <Image src={cat.image} alt={cat.name} fill className={`object-contain p-2 transition-all duration-200 ${hasAccess ? 'group-hover:scale-110 group-hover:brightness-110 brightness-105' : 'grayscale opacity-50'}`} />
+                    <Image src={cat.image} alt={cat.name} fill priority loading="eager" sizes="(max-width: 640px) 40vw, 15vw" className={`object-contain p-2 transition-all duration-200 ${hasAccess ? 'group-hover:scale-110 group-hover:brightness-110 brightness-105' : 'grayscale opacity-50'}`} />
                   </div>
                   <p className={`text-lg font-bold ${hasAccess ? 'text-gray-800' : 'text-gray-500'}`}>{cat.name}</p>
                   <p className={`text-sm ${hasAccess ? 'text-gray-600' : 'text-gray-400'}`} dir="rtl">{cat.nameAr}</p>
