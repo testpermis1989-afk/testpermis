@@ -42,7 +42,6 @@ export async function GET(request: NextRequest) {
       image: q.image,
       audio: q.audio,
       video: q.video,
-      responseImage: q.text, // Contains the response image path
       duration: q.duration,
       responses: q.responses.map((r) => ({
         id: r.id,

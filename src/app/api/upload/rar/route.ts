@@ -156,12 +156,10 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
   const imagesDir = path.join(uploadDir, 'images');
   const audioDir = path.join(uploadDir, 'audio');
   const videoDir = path.join(uploadDir, 'video');
-  const responsesDir = path.join(uploadDir, 'responses');
 
   await mkdir(imagesDir, { recursive: true });
   await mkdir(audioDir, { recursive: true });
   await mkdir(videoDir, { recursive: true });
-  await mkdir(responsesDir, { recursive: true });
 
   let extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false };
   let questionsImported = 0;
@@ -210,11 +208,6 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
       if (isQuestionImage(entryName, entryNameFull)) {
         zip.extractEntryTo(entry, imagesDir, false, true);
         extractedFiles.images++;
-        continue;
-      }
-      if (isResponseImage(entryName, entryNameFull)) {
-        zip.extractEntryTo(entry, responsesDir, false, true);
-        extractedFiles.responses++;
         continue;
       }
       if (isAudioFile(entryName, entryNameFull)) {
@@ -531,12 +524,10 @@ async function processTxtFile(txtPath: string, categoryCode: string, serieNumber
     if (isNaN(questionNumber)) continue;
 
     const imagesDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'images');
-    const responsesDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'responses');
     const audioDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'audio');
     const videoDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'video');
 
     const imageFile = await findRealFile(imagesDir, questionNumber, ['q', '']);
-    const responseFile = await findRealFile(responsesDir, questionNumber, ['r', 'R']);
     const audioFile = await findRealFile(audioDir, questionNumber, ['q', '']);
     const videoFile = await findRealFile(videoDir, questionNumber, ['q', '']);
 
@@ -547,7 +538,7 @@ async function processTxtFile(txtPath: string, categoryCode: string, serieNumber
         image: imageFile ? `/uploads/${categoryCode}/${serieNumber}/images/${imageFile}` : '',
         audio: audioFile ? `/uploads/${categoryCode}/${serieNumber}/audio/${audioFile}` : '',
         video: videoFile ? `/uploads/${categoryCode}/${serieNumber}/video/${videoFile}` : null,
-        text: responseFile ? `/uploads/${categoryCode}/${serieNumber}/responses/${responseFile}` : '',
+        text: '',
       },
     });
 

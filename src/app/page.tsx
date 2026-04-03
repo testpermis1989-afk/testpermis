@@ -1018,7 +1018,6 @@ interface QuestionData {
   image: string;
   audio: string;
   video: string | null;
-  responseImage: string;
   duration: number;
   responses: { id: string; order: number; text: string; isCorrect: boolean }[];
 }
@@ -1571,27 +1570,6 @@ const TestScreen = ({ category, series, chronoTime, onFinish, onBack }: { catego
         ) : null}
       </div>
 
-      {/* Image de la réponse (affichée en bas à droite) */}
-      {question.responseImage && (
-        <div 
-          className="absolute border-2 border-white rounded"
-          style={{
-            bottom: '8%',
-            right: '2%',
-            width: '22%',
-            height: '35%'
-          }}
-        >
-          <Image 
-            src={question.responseImage}
-            alt="Réponse"
-            fill
-            className="object-contain"
-            unoptimized
-          />
-        </div>
-      )}
-
       {/* Bouton Corriger - indépendant */}
       <div className="absolute flex items-center justify-center" style={{ top: '22%', right: '5.5%', zIndex: 20, width: 'clamp(70px,11vw,170px)' }}>
         <div className="relative" style={{ pointerEvents: 'none' }}>
@@ -2062,7 +2040,6 @@ interface QuestionView {
   image: string;
   audio: string;
   video: string | null;
-  responseImage: string;
   responses: { order: number; isCorrect: boolean }[];
 }
 
@@ -2518,7 +2495,6 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           image: q.image,
           audio: q.audio,
           video: q.video,
-          responseImage: q.responseImage,
           responses: q.responses,
         })));
       }
