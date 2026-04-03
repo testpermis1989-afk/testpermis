@@ -1780,7 +1780,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
               dir="rtl"
               style={{
                 marginTop: '1rem',
-                marginRight: '8.75rem',
+                marginRight: '0.5rem',
                 fontSize: 'clamp(8px, 1vw, 13px)',
                 color: 'black',
                 fontWeight: 'normal',
