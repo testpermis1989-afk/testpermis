@@ -1765,7 +1765,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
         <span
           className="absolute"
           style={{
-            bottom: '10.5%',
+            bottom: '14.5%',
             right: '4%',
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
@@ -1782,7 +1782,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
           dir="rtl"
           className="absolute"
           style={{
-            bottom: '6%',
+            bottom: '10%',
             right: '12%',
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
