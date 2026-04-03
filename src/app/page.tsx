@@ -2455,6 +2455,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
   const [formPhotoFile, setFormPhotoFile] = useState<File | null>(null);
   const [formPhotoOriginalSize, setFormPhotoOriginalSize] = useState(0);
   const [formPhotoUploading, setFormPhotoUploading] = useState(false);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
   const [formMessage, setFormMessage] = useState('');
   const [formMsgType, setFormMsgType] = useState<'success' | 'error'>('success');
 
@@ -2462,7 +2463,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setFormCin(''); setFormNomFr(''); setFormPrenomFr(''); setFormNomAr('');
     setFormPrenomAr(''); setFormCategory('B'); setFormExamDate(''); setFormPin('');
     setFormPassword(''); setFormPhoto(null); setFormPhotoFile(null);
-    setFormPhotoOriginalSize(0); setFormPhotoUploading(false); setFormMessage(''); setEditingUser(null);
+    setFormPhotoOriginalSize(0); setFormPhotoUploading(false); setPhotoRemoved(false); setFormMessage(''); setEditingUser(null);
   };
 
   const compressImage = (file: File, maxSize: number = 300, quality: number = 0.7): Promise<{ blob: Blob; dataUrl: string }> => {
@@ -2512,6 +2513,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setFormPhoto(null);
     setFormPhotoFile(null);
     setFormPhotoOriginalSize(0);
+    setPhotoRemoved(true);
   };
 
   const fetchUsers = async () => {
@@ -2541,7 +2543,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setSavingUser(true); setFormMessage('');
     try {
       // Upload photo first if a new file was selected
-      let photoUrl = editingUser?.photo || null;
+      let photoUrl: string | null = photoRemoved ? null : (editingUser?.photo || null);
       if (formPhotoFile) {
         setFormPhotoUploading(true);
         const formData = new FormData();
