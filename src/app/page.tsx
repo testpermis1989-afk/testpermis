@@ -393,7 +393,7 @@ const exitFullscreen = () => {
 };
 
 // ===== ÉCRAN MOT DE PASSE (NOUVEAU DESIGN) =====
-const PasswordScreen = ({ category, series, userPin, onSuccess, onBack }: { category: Category; series: number; userPin: string; onSuccess: () => void; onBack: () => void }) => {
+const PasswordScreen = ({ category, series, userCin, userPin, onSuccess, onBack }: { category: Category; series: number; userCin: string; userPin: string; onSuccess: () => void; onBack: () => void }) => {
   const [code, setCode] = useState("");
   const [imageLoaded, setImageLoaded] = useState(false);
   const [orientationChecked, setOrientationChecked] = useState(false);
@@ -687,10 +687,10 @@ const PasswordScreen = ({ category, series, userPin, onSuccess, onBack }: { cate
         backgroundRepeat: 'no-repeat'
       }}
     >
-      {/* Code PIN par défaut - "AB123456" */}
+      {/* N°CIN de l'utilisateur */}
       <div className="absolute flex items-center" style={{ top: '66%', left: '30%' }}>
         <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '1.8vw', fontWeight: 'bold', color: 'white' }}>
-          AB123456
+          {userCin}
         </span>
       </div>
 
@@ -4052,7 +4052,7 @@ export default function DrivingTestApp() {
       {screen === "login" && <LoginScreen onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
       {screen === "categories" && <CategoriesScreen user={currentUser} onSelectCategory={handleSelectCategory} onLogout={handleLogout} onProfile={() => setScreen('profile')} />}
       {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onMelange={handleMelange} onBack={handleGoHome} />}
-      {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} userPin={currentUser?.pinCode || ''} onSuccess={handlePasswordSuccess} onBack={() => setScreen('series')} />}
+      {screen === "password" && selectedCategory && <PasswordScreen category={selectedCategory} series={selectedSeries} userCin={currentUser?.cin || ''} userPin={currentUser?.pinCode || ''} onSuccess={handlePasswordSuccess} onBack={() => setScreen('series')} />}
       {screen === "counter" && selectedCategory && <CounterScreen category={selectedCategory} series={selectedSeries} onStart={handleCounterStart} />}
       {screen === "test" && selectedCategory && <TestScreen category={selectedCategory} series={selectedSeries} chronoTime={selectedChronoTime} melangeQuestions={melangeQuestions || undefined} onFinish={handleFinishTest} onBack={() => setScreen('series')} />}
       {screen === "result" && selectedCategory && testResult && <ResultScreen score={testResult.score} total={testResult.total} onRestart={handleRestart} onHome={handleGoHome} onCorrection={() => setScreen('correction')} />}
