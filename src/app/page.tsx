@@ -1770,7 +1770,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
             color: 'black',
-            fontWeight: 'normal',
+            fontWeight: 'bold',
           }}
         >
           {user.prenomFr || ''} {user.nomFr || ''}
@@ -1787,7 +1787,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
             color: 'black',
-            fontWeight: 'normal',
+            fontWeight: 'bold',
           }}
         >
           {user.prenomAr || ''} {user.nomAr || ''}
