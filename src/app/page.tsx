@@ -763,11 +763,12 @@ const PasswordScreen = ({ category, series, userCin, userPin, userPhoto, onSucce
         <div
           className="absolute overflow-hidden"
           style={{
-            top: '40%',
+            top: '20%',
             left: '20%',
-            width: '10vw',
+            width: '40vw',
             height: '7.5vw',
-            border: 'none',
+            borderRadius: '12px',
+            border: '2px solid transparent',
           }}
         >
           <img src={userPhoto} alt="Photo" className="w-full h-full object-cover" />
