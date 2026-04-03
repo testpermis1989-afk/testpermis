@@ -1769,7 +1769,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
             right: '4%',
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
-            color: 'red',
+            color: '#DC143C',
             fontWeight: 'bold',
           }}
         >
@@ -1786,7 +1786,7 @@ const TestScreen = ({ category, series, chronoTime, melangeQuestions, user, onFi
             right: '12%',
             zIndex: 20,
             fontSize: 'clamp(8px, 1vw, 13px)',
-            color: 'red',
+            color: '#DC143C',
             fontWeight: 'bold',
           }}
         >
