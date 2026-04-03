@@ -31,6 +31,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Désactivation automatique si la date d'examen est atteinte ou dépassée
+    if (user.examDate && user.isActive) {
+      const nowMorocco = new Date().toLocaleString('en-US', { timeZone: 'Africa/Casablanca' });
+      const todayMorocco = new Date(nowMorocco);
+      todayMorocco.setHours(0, 0, 0, 0);
+      const examDate = new Date(user.examDate + 'T00:00:00');
+      if (examDate <= todayMorocco) {
+        await db.user.update({
+          where: { cin },
+          data: { isActive: false },
+        });
+        return NextResponse.json(
+          { error: 'Compte désactivé - la date de votre examen est passée' },
+          { status: 403 }
+        )
+      }
+    }
+
     if (!user.isActive) {
       return NextResponse.json(
         { error: 'Compte désactivé' },

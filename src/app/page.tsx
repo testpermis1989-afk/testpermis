@@ -84,7 +84,7 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cin: cin.trim(), password }),
+        body: JSON.stringify({ cin: cin.trim().toUpperCase(), password }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -119,7 +119,7 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
           {error && <div className="bg-red-100 border-2 border-red-400 text-red-700 px-4 py-2 rounded-lg mb-4 text-center">{error}</div>}
           <div className="mb-4">
             <label className="block text-gray-700 text-sm font-bold mb-2">N°CIN - رقم بطاقة التعريف الوطنية</label>
-            <input type="text" value={cin} onChange={(e) => setCin(e.target.value)} className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-gray-800" placeholder="Entrez votre N°CIN" />
+            <input type="text" value={cin.toUpperCase()} onChange={(e) => setCin(e.target.value.toUpperCase())} className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 bg-white text-gray-800 uppercase" placeholder="Entrez votre N°CIN" />
           </div>
           <div className="mb-6">
             <label className="block text-gray-700 text-sm font-bold mb-2">Mot de passe</label>
@@ -128,9 +128,7 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
           <button onClick={handleLogin} disabled={loading} className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-lg font-bold text-lg hover:from-blue-600 hover:to-blue-700 shadow-lg disabled:opacity-50">
             {loading ? 'Connexion...' : 'Se connecter / تسجيل الدخول'}
           </button>
-          <div className="mt-4 p-3 bg-gray-100 rounded-lg text-xs">
-            <p className="text-center text-gray-600">Admin: admin / admin123</p>
-          </div>
+
         </div>
       </div>
     </div>
@@ -361,9 +359,6 @@ const SeriesScreen = ({ category, onSelectSeries, onMelange, onBack }: { categor
           ) : (
             <p className="text-center text-gray-500 py-8">Aucune série disponible - لا توجد سلاسل متاحة</p>
           )}
-          <div className="mt-6 text-center text-gray-600">
-            <p>Chaque série contient {category.questionsPerSeries} questions</p>
-          </div>
         </div>
       </div>
     </div>
@@ -690,7 +685,7 @@ const PasswordScreen = ({ category, series, userCin, userPin, onSuccess, onBack 
       {/* N°CIN de l'utilisateur */}
       <div className="absolute flex items-center" style={{ top: '66%', left: '30%' }}>
         <span style={{ fontFamily: 'Arial, sans-serif', fontSize: '1.8vw', fontWeight: 'bold', color: 'white' }}>
-          {userCin}
+          {userCin.toUpperCase()}
         </span>
       </div>
 
@@ -2354,6 +2349,18 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
   const handleSaveUser = async () => {
     if (!formCin.trim()) { setFormMessage('N°CIN est obligatoire'); setFormMsgType('error'); return; }
+    // Validation date examen - doit être supérieure à la date actuelle (fuseau Maroc Africa/Casablanca)
+    if (formExamDate) {
+      const nowMorocco = new Date().toLocaleString('en-US', { timeZone: 'Africa/Casablanca' });
+      const todayMorocco = new Date(nowMorocco);
+      todayMorocco.setHours(0, 0, 0, 0);
+      const examDate = new Date(formExamDate + 'T00:00:00');
+      if (examDate <= todayMorocco) {
+        setFormMessage("La date de l'examen doit être supérieure à la date d'aujourd'hui");
+        setFormMsgType('error');
+        return;
+      }
+    }
     setSavingUser(true); setFormMessage('');
     try {
       // Upload photo first if a new file was selected
@@ -2374,7 +2381,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       }
 
       const body: any = {
-        cin: formCin.trim(),
+        cin: formCin.trim().toUpperCase(),
         nomFr: formNomFr || null,
         prenomFr: formPrenomFr || null,
         nomAr: formNomAr || null,
@@ -3812,7 +3819,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-bold text-white">👥 Gestion des utilisateurs</h3>
-                <button onClick={() => { setEditingUser(null); setShowUserForm(true); }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm">➕ Nouvel utilisateur</button>
+                <button onClick={() => { resetUserForm(); setShowUserForm(true); }} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm">➕ Nouvel utilisateur</button>
               </div>
 
               {/* Formulaire utilisateur */}
@@ -3859,7 +3866,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
                     <div>
                       <label className="block text-gray-300 text-xs mb-1">N°CIN *</label>
-                      <input type="text" value={formCin} onChange={e => setFormCin(e.target.value)} disabled={!!editingUser} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm disabled:opacity-50" placeholder="CIN obligatoire" />
+                      <input type="text" value={formCin.toUpperCase()} onChange={e => setFormCin(e.target.value.toUpperCase())} disabled={!!editingUser} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm disabled:opacity-50 uppercase" placeholder="CIN obligatoire" />
                     </div>
                     <div>
                       <label className="block text-gray-300 text-xs mb-1">Nom (FR)</label>
