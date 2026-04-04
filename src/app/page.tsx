@@ -2561,7 +2561,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         pinCode: formPin,
         photo: photoUrl,
       };
-      if (!editingUser && formPassword) body.password = formPassword;
+      if (formPassword) body.password = formPassword;
 
       const url = editingUser ? `/api/users/${editingUser.cin}` : '/api/users';
       const method = editingUser ? 'PUT' : 'POST';
@@ -4151,12 +4151,10 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                       <label className="block text-gray-300 text-xs mb-1">Code PIN</label>
                       <input type="text" maxLength={4} value={formPin} onChange={e => setFormPin(e.target.value.replace(/\D/g, ''))} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="4 chiffres ou vide" />
                     </div>
-                    {!editingUser && (
-                      <div>
-                        <label className="block text-gray-300 text-xs mb-1">Mot de passe</label>
-                        <input type="text" value={formPassword} onChange={e => setFormPassword(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder="Défaut: 1234" />
-                      </div>
-                    )}
+                    <div>
+                      <label className="block text-gray-300 text-xs mb-1">Mot de passe {editingUser ? <span className="text-gray-500">(laisser vide = ne pas changer)</span> : ''}</label>
+                      <input type="text" value={formPassword} onChange={e => setFormPassword(e.target.value)} className="w-full px-3 py-2 bg-gray-700 border border-gray-500 rounded text-white text-sm" placeholder={editingUser ? "Nouveau mot de passe" : "Défaut: 1234"} />
+                    </div>
                   </div>
                   {formMessage && (
                     <div className={`px-3 py-1 rounded text-sm mb-2 ${formMsgType === 'success' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{formMessage}</div>
