@@ -4,18 +4,18 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
 
 function getDbPath(): string {
   const dbUrl = process.env.DATABASE_URL || '';
   if (dbUrl.startsWith('file:')) {
     let dbPath = dbUrl.replace(/^file:/, '');
     if (!dbPath.startsWith('/')) {
-      dbPath = path.join(process.cwd(), dbPath);
+      dbPath = path.join(/*turbopackIgnore: true*/ process.cwd(), dbPath);
     }
     return dbPath;
   }
-  return path.join(DATA_DIR, 'permis.db');
+  return path.join(/*turbopackIgnore: true*/ DATA_DIR, 'permis.db');
 }
 
 let _db: Database.Database | null = null;
