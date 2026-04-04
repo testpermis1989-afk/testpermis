@@ -3,6 +3,7 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '@/lib/db';
 import { uploadFile, getPublicUrl } from '@/lib/supabase';
+import { saveUploadJob, getUploadBuffer, deleteUploadJob } from '@/lib/upload-store';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -15,14 +16,47 @@ const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
 };
 
-// POST /api/upload/rar - Upload, verify and import ZIP file (all in one request)
-// Vercel-compatible: no temp storage, no filesystem writes
+// POST /api/upload/rar - Upload, verify, compress and import ZIP file
+// Supports 3 modes:
+//   1. multipart/form-data + verifyOnly=true → Verify only, save to temp storage, return importId
+//   2. multipart/form-data (no verifyOnly) → Direct upload + import in one request
+//   3. JSON { importId, category, serie } → Load from temp storage and import
 export async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get('content-type') || '';
 
+    // Mode 3: JSON with importId (import from temp storage)
+    if (contentType.includes('application/json')) {
+      const body = await request.json();
+      const { importId, category: categoryCode, serie: serieNumber } = body;
+
+      if (!importId || !categoryCode || !serieNumber) {
+        return NextResponse.json({ error: 'Champs manquants (importId, category, serie)' }, { status: 400 });
+      }
+
+      // Load ZIP buffer from Supabase temp storage
+      const zipBuffer = await getUploadBuffer(importId);
+      if (!zipBuffer) {
+        return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
+      }
+
+      // Also check for compressed version
+      let compressedBuffer = await getUploadBuffer(importId + '_compressed');
+      const bufferToUse = compressedBuffer || zipBuffer;
+
+      // Extract and import
+      const result = await extractAndImport(bufferToUse, categoryCode, parseInt(serieNumber));
+
+      // Cleanup temp storage
+      try { await deleteUploadJob(importId); } catch {}
+      try { await deleteUploadJob(importId + '_compressed'); } catch {}
+
+      return NextResponse.json({ success: true, ...result });
+    }
+
+    // Mode 1 & 2: multipart/form-data
     if (!contentType.includes('multipart/form-data')) {
-      return NextResponse.json({ error: 'Utilisez FormData pour uploader un fichier' }, { status: 400 });
+      return NextResponse.json({ error: 'Utilisez FormData ou JSON pour uploader' }, { status: 400 });
     }
 
     const formData = await request.formData();
@@ -64,23 +98,51 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // If verifyOnly, return verification without importing
+    // Mode 1: Verify only → save to temp storage, return importId
     if (verifyOnly) {
+      // Generate unique import ID
+      const importId = `imp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+      try {
+        // Save ZIP buffer + metadata to Supabase temp storage
+        await saveUploadJob(importId, buffer, {
+          categoryCode,
+          serieNumber,
+          fileName: file.name,
+          fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          verified: verification.isValid,
+          createdAt: Date.now(),
+        });
+      } catch (saveError) {
+        console.error('Failed to save to temp storage:', saveError);
+        // If temp storage fails but verification passed, still return results
+        // The user can use direct upload as fallback
+        return NextResponse.json({
+          success: true,
+          mode: 'verification',
+          fileName: file.name,
+          fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+          verification,
+          importId: null,
+          tempStorageError: true,
+        });
+      }
+
       return NextResponse.json({
         success: true,
         mode: 'verification',
         fileName: file.name,
         fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        verification
+        verification,
+        importId,
       });
     }
 
-    // If verification failed, return errors
+    // Mode 2: Direct import (everything in one request!)
     if (!verification.isValid) {
       return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
     }
 
-    // Import directly (everything in one request!)
     const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
     return NextResponse.json({
       success: true,
