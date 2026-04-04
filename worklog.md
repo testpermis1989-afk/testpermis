@@ -293,3 +293,35 @@ Stage Summary:
 - Audio/video compression/repair gracefully skipped (ffmpeg unavailable on Vercel)
 - Auto-import after verification now works correctly (handleImport was missing)
 - ESLint passes clean, dev server compiles successfully
+---
+Task ID: 8
+Agent: Main Agent
+Task: Fix verify→compress→import flow - was completely broken (buttons missing, importId not passed, wrong content-type)
+
+Work Log:
+- Diagnosed 4 critical bugs in the verify→compress→import pipeline:
+  1. Server verifyOnly mode did NOT save ZIP to temp storage and did NOT return importId
+  2. Frontend handleVerify never set pendingImportId from response
+  3. handleImport sent JSON but server only accepted multipart/form-data → always returned 400
+  4. Verification modal footer had NO compress or import buttons (only "Fermer")
+
+- Fixed `src/app/api/upload/rar/route.ts` POST handler (3 modes):
+  - Mode 1: multipart + verifyOnly=true → save ZIP to Supabase temp, return importId
+  - Mode 2: multipart (no verifyOnly) → direct upload + import in one request
+  - Mode 3: JSON { importId, category, serie } → load from temp storage, auto-check for _compressed version, import
+
+- Fixed `src/app/page.tsx` frontend:
+  - handleVerify: now captures data.importId and sets pendingImportId
+  - handleVerify: added `data.mode === 'verification'` branch (was falling through to "Erreur inconnue")
+  - Verification modal footer: added "🗜️ Compresser" and "✅ Importer directement" buttons
+  - Added "📥 Uploader et importer directement" button below verify button (one-step import)
+  - Import button text changes to "✅ Importer (compressé)" after compression done
+
+- Committed and pushed to GitHub (commit a9a93dc)
+
+Stage Summary:
+- Complete verify→compress→import pipeline now functional
+- Direct import (one-step) also available as alternative
+- Server auto-selects compressed version if available when importing
+- ESLint passes clean, pushed to GitHub for Vercel auto-deploy
+- IMPORTANT: User must verify NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set in Vercel env vars
