@@ -166,3 +166,66 @@ Stage Summary:
 - Stop button now calculates score and shows result screen
 - reponses.txt auto-generated from database in ZIP downloads
 - All changes pass ESLint cleanly
+---
+## Task ID: 6
+### Work Task
+Migrate ALL file storage from local filesystem (`public/uploads/`) to Supabase Storage for Vercel read-only filesystem compatibility.
+
+### Work Summary
+
+#### Created
+- **`src/lib/supabase.ts`** - Supabase client helper with functions:
+  - `supabase` - Supabase client instance
+  - `getPublicUrl(path)` - Get public URL for a file in the uploads bucket
+  - `uploadFile(path, file, contentType)` - Upload file to Supabase Storage with upsert
+  - `deleteFile(path)` - Delete a single file from Supabase Storage
+  - `deleteFolder(prefix)` - List and delete all files in a folder
+  - `downloadFile(path)` - Download a file as Buffer
+  - `listFiles(prefix)` - List files in a Storage folder
+  - `toSupabaseUrl(localPath)` - Convert legacy `/uploads/...` path to full Supabase public URL
+  - `toStoragePath(localPath)` - Convert legacy path to Supabase storage path
+
+#### Updated `.env`
+- Added `NEXT_PUBLIC_SUPABASE_URL=https://kiydexwjjhzjynxddqhc.supabase.co`
+- Added `NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_CyUCL1H-hxCENCFiSmAMeA_jqeo1R8i`
+
+#### Migrated API Routes (16 files changed)
+
+1. **`/api/upload/photo/route.ts`** - Photos now upload to `photos/{cin}.{ext}` in Supabase Storage, returns public URL
+
+2. **`/api/upload/rar/route.ts`** - Major rewrite:
+   - ZIP data kept in memory buffer instead of temp filesystem file
+   - Extracted files uploaded to `series/{category}/{serie}/images|audio|video|responses/` in Supabase Storage
+   - TXT parsing stores full Supabase public URLs in database
+   - `findFileInStorage()` replaces `findRealFile()` - lists Supabase Storage folder instead of reading filesystem
+   - GET endpoint lists files from Supabase Storage instead of filesystem
+
+3. **`/api/upload/rar/verify/route.ts`** - Now accepts base64-encoded ZIP buffer, verifies from buffer (no filesystem needed)
+
+4. **`/api/upload/rar/repair/route.ts`** - Accepts base64 ZIP buffer, repairs using `os.tmpdir()` for temp files, returns repaired ZIP as base64
+
+5. **`/api/upload/rar/compress/route.ts`** - Accepts base64 ZIP buffer, compresses using `os.tmpdir()` for temp processing, returns compressed ZIP as base64
+
+6. **`/api/questions/route.ts`** - Uses `toSupabaseUrl()` to convert stored paths to full Supabase public URLs for all images/audio/video/response images
+
+7. **`/api/questions/import/route.ts`** - Excel import now generates Supabase Storage public URLs when creating question records
+
+8. **`/api/questions/melange/route.ts`** - Uses `toSupabaseUrl()` to convert all media paths in shuffled questions
+
+9. **`/api/questions/reprocess/route.ts`** - Scans Supabase Storage instead of filesystem, updates DB with correct public URLs
+
+10. **`/api/questions/delete/route.ts`** - Deletes files from Supabase Storage folders using `deleteFolder()` instead of `rm()`
+
+11. **`/api/admin/download/route.ts`** - Downloads files from Supabase Storage and creates ZIP, generates reponses.txt from DB
+
+12. **`/api/series/repair/route.ts`** - Downloads from Supabase, repairs with sharp/ffmpeg using `os.tmpdir()`, re-uploads to Supabase
+
+13. **`/api/admin/compress/route.ts`** - Downloads from Supabase, compresses with sharp/ffmpeg using `os.tmpdir()`, re-uploads to Supabase, updates DB paths
+
+#### Key Architecture Decisions
+- Storage path format: `series/{category}/{serie}/images/{filename}` (was `/uploads/{category}/{serie}/images/{filename}`)
+- Photo path format: `photos/{cin}.{ext}` (was `/uploads/photos/{cin}.{ext}`)
+- Database stores full Supabase public URLs for new imports (backward compatible via `toSupabaseUrl()` for old paths)
+- ZIP processing uses in-memory buffers + `os.tmpdir()` for temp files (Vercel-compatible)
+- No Prisma schema changes needed
+- No frontend changes needed (URLs are opaque to the UI)
