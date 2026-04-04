@@ -1,20 +1,53 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Supabase configuration - uses env vars with hardcoded fallbacks for Vercel deployment
+// Supabase configuration
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kiydexwjjhzjynxddqhc.supabase.co'
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_CyUCL1H-hxCENCFiSmAMeA_jqeo1R8i'
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+// Storage mode: 'supabase' (cloud) or 'local' (filesystem/Electron)
+export const STORAGE_MODE = (process.env.STORAGE_MODE || 'supabase') as 'supabase' | 'local'
 
-// Helper to get public URL for a file in the uploads bucket
-export function getPublicUrl(path: string): string {
-  const { data } = supabase.storage.from('uploads').getPublicUrl(path)
+// Initialize Supabase client only if needed
+let _supabase: ReturnType<typeof createClient> | null = null
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  }
+  return _supabase
+}
+export const supabase = STORAGE_MODE === 'supabase' ? getSupabase() : null
+
+// =====================================================
+// Storage functions - switch between Supabase / Local
+// =====================================================
+
+/**
+ * Get public URL for a file
+ */
+export function getPublicUrl(storagePath: string): string {
+  if (!storagePath) return ''
+  if (storagePath.startsWith('http')) return storagePath
+
+  if (STORAGE_MODE === 'local') {
+    return `/api/serve/${storagePath}`
+  }
+
+  const client = getSupabase()
+  const { data } = client.storage.from('uploads').getPublicUrl(storagePath)
   return data.publicUrl
 }
 
-// Helper to upload a file to Supabase Storage
-export async function uploadFile(path: string, file: Buffer | Uint8Array | ArrayBuffer, contentType?: string): Promise<string> {
-  const { data, error } = await supabase.storage.from('uploads').upload(path, file, {
+/**
+ * Upload a file
+ */
+export async function uploadFile(storagePath: string, file: Buffer | Uint8Array | ArrayBuffer, contentType?: string): Promise<string> {
+  if (STORAGE_MODE === 'local') {
+    const { uploadFile: localUpload } = await import('./local-storage')
+    return localUpload(storagePath, file, contentType)
+  }
+
+  const client = getSupabase()
+  const { data, error } = await client.storage.from('uploads').upload(storagePath, file, {
     contentType,
     upsert: true,
   })
@@ -22,37 +55,69 @@ export async function uploadFile(path: string, file: Buffer | Uint8Array | Array
   return data.path
 }
 
-// Helper to delete a file from Supabase Storage
-export async function deleteFile(path: string): Promise<void> {
-  const { error } = await supabase.storage.from('uploads').remove([path])
+/**
+ * Delete a file
+ */
+export async function deleteFile(storagePath: string): Promise<void> {
+  if (STORAGE_MODE === 'local') {
+    const { deleteFile: localDelete } = await import('./local-storage')
+    return localDelete(storagePath)
+  }
+
+  const client = getSupabase()
+  const { error } = await client.storage.from('uploads').remove([storagePath])
   if (error) throw error
 }
 
-// Helper to delete a folder from Supabase Storage (lists all files then removes them)
+/**
+ * Delete all files in a folder
+ */
 export async function deleteFolder(prefix: string): Promise<void> {
-  const { data, error } = await supabase.storage.from('uploads').list(prefix)
+  if (STORAGE_MODE === 'local') {
+    const { deleteFolder: localDeleteFolder } = await import('./local-storage')
+    return localDeleteFolder(prefix)
+  }
+
+  const client = getSupabase()
+  const { data, error } = await client.storage.from('uploads').list(prefix)
   if (error) throw error
   if (data && data.length > 0) {
     const paths = data.map(f => `${prefix}/${f.name}`)
-    const { error: removeError } = await supabase.storage.from('uploads').remove(paths)
+    const { error: removeError } = await client.storage.from('uploads').remove(paths)
     if (removeError) throw removeError
   }
 }
 
-// Helper to download a file from Supabase Storage
-export async function downloadFile(path: string): Promise<Buffer> {
-  const { data, error } = await supabase.storage.from('uploads').download(path)
+/**
+ * Download a file
+ */
+export async function downloadFile(storagePath: string): Promise<Buffer> {
+  if (STORAGE_MODE === 'local') {
+    const { downloadFile: localDownload } = await import('./local-storage')
+    return localDownload(storagePath)
+  }
+
+  const client = getSupabase()
+  const { data, error } = await client.storage.from('uploads').download(storagePath)
   if (error) throw error
   const arrayBuffer = await data.arrayBuffer()
   return Buffer.from(arrayBuffer)
 }
 
-// Helper to list files in a Supabase Storage folder
+/**
+ * List files in a folder
+ */
 export async function listFiles(prefix: string): Promise<string[]> {
+  if (STORAGE_MODE === 'local') {
+    const { listFiles: localList } = await import('./local-storage')
+    return localList(prefix)
+  }
+
+  const client = getSupabase()
   const files: string[] = []
   let currentPage = prefix
   while (true) {
-    const { data, error } = await supabase.storage.from('uploads').list(currentPage)
+    const { data, error } = await client.storage.from('uploads').list(currentPage)
     if (error) throw error
     if (!data || data.length === 0) break
     for (const f of data) {
@@ -64,18 +129,19 @@ export async function listFiles(prefix: string): Promise<string[]> {
   return files
 }
 
-// Convert a legacy local path (e.g. /uploads/A/1/images/q1.png) to Supabase storage path (series/A/1/images/q1.png)
-// and return the full public URL
+/**
+ * Convert a legacy local path to Supabase URL
+ */
 export function toSupabaseUrl(localPath: string | null | undefined): string {
   if (!localPath) return ''
-  // If it's already a full URL, return as-is
   if (localPath.startsWith('http')) return localPath
-  // Convert /uploads/A/1/images/q1.png → series/A/1/images/q1.png
   const storagePath = localPath.replace(/^\/uploads\//, 'series/')
   return getPublicUrl(storagePath)
 }
 
-// Convert legacy local path to Supabase storage path (without getting public URL)
+/**
+ * Convert legacy local path to storage path
+ */
 export function toStoragePath(localPath: string | null | undefined): string {
   if (!localPath) return ''
   if (localPath.startsWith('http')) return localPath

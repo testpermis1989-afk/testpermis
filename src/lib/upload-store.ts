@@ -1,103 +1,130 @@
-import { supabase } from './supabase'
+// Upload store - supports both Supabase (cloud) and local filesystem (Electron) modes
+import fs from 'fs';
+import path from 'path';
 
-/**
- * Upload store - persists ZIP buffers in Supabase Storage between serverless invocations.
- * On Vercel, each API route invocation has separate memory, so in-memory Maps don't work.
- * Instead, we store the ZIP buffer temporarily in Supabase Storage.
- */
+const STORAGE_MODE = (process.env.STORAGE_MODE || 'supabase') as 'supabase' | 'local';
 
-const TEMP_BUCKET = 'uploads'
-const TEMP_PREFIX = 'temp-uploads/'
-
-// Store metadata alongside the buffer
 interface UploadJob {
-  categoryCode: string
-  serieNumber: string
-  fileName: string
-  fileSize: string
-  verified: boolean
-  createdAt: number
+  categoryCode: string;
+  serieNumber: string;
+  fileName: string;
+  fileSize: string;
+  verified: boolean;
+  createdAt: number;
 }
 
-/**
- * Save a ZIP buffer to temp storage with metadata
- */
-export async function saveUploadJob(
-  importId: string,
-  zipBuffer: Buffer,
-  metadata: UploadJob
-): Promise<void> {
-  // Save ZIP buffer
+// ========== LOCAL STORAGE (Electron mode) ==========
+
+const LOCAL_DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+const LOCAL_TEMP_DIR = path.join(LOCAL_DATA_DIR, 'temp-uploads');
+
+function ensureLocalDir(): void {
+  if (!fs.existsSync(LOCAL_TEMP_DIR)) {
+    fs.mkdirSync(LOCAL_TEMP_DIR, { recursive: true });
+  }
+}
+
+async function saveLocalUploadJob(importId: string, zipBuffer: Buffer, metadata: UploadJob): Promise<void> {
+  ensureLocalDir();
+  fs.writeFileSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`), zipBuffer);
+  fs.writeFileSync(path.join(LOCAL_TEMP_DIR, `${importId}.json`), JSON.stringify(metadata));
+}
+
+async function getLocalUploadBuffer(importId: string): Promise<Buffer | null> {
+  const fullPath = path.join(LOCAL_TEMP_DIR, `${importId}.zip`);
+  if (!fs.existsSync(fullPath)) return null;
+  return fs.readFileSync(fullPath);
+}
+
+async function deleteLocalUploadJob(importId: string): Promise<void> {
+  try {
+    fs.unlinkSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`));
+  } catch {}
+  try {
+    fs.unlinkSync(path.join(LOCAL_TEMP_DIR, `${importId}.json`));
+  } catch {}
+}
+
+async function hasLocalUploadJob(importId: string): Promise<boolean> {
+  return fs.existsSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`));
+}
+
+// ========== SUPABASE STORAGE (cloud mode) ==========
+
+async function saveSupabaseUploadJob(importId: string, zipBuffer: Buffer, metadata: UploadJob): Promise<void> {
+  const { supabase } = await import('./supabase');
   const { error: bufError } = await supabase.storage
-    .from(TEMP_BUCKET)
-    .upload(`${TEMP_PREFIX}${importId}.zip`, zipBuffer, {
+    .from('uploads')
+    .upload(`temp-uploads/${importId}.zip`, zipBuffer, {
       contentType: 'application/zip',
       upsert: true,
-    })
-  if (bufError) throw new Error(`Failed to save temp ZIP: ${bufError.message}`)
+    });
+  if (bufError) throw new Error(`Failed to save temp ZIP: ${bufError.message}`);
 
-  // Save metadata
   const { error: metaError } = await supabase.storage
-    .from(TEMP_BUCKET)
-    .upload(
-      `${TEMP_PREFIX}${importId}.json`,
-      JSON.stringify(metadata),
-      {
-        contentType: 'application/json',
-        upsert: true,
-      }
-    )
-  if (metaError) throw new Error(`Failed to save temp metadata: ${metaError.message}`)
+    .from('uploads')
+    .upload(`temp-uploads/${importId}.json`, JSON.stringify(metadata), {
+      contentType: 'application/json',
+      upsert: true,
+    });
+  if (metaError) throw new Error(`Failed to save temp metadata: ${metaError.message}`);
 }
 
-/**
- * Retrieve a ZIP buffer from temp storage
- */
-export async function getUploadBuffer(importId: string): Promise<Buffer | null> {
+async function getSupabaseUploadBuffer(importId: string): Promise<Buffer | null> {
+  const { supabase } = await import('./supabase');
   const { data, error } = await supabase.storage
-    .from(TEMP_BUCKET)
-    .download(`${TEMP_PREFIX}${importId}.zip`)
-
-  if (error || !data) return null
-  const arrayBuffer = await data.arrayBuffer()
-  return Buffer.from(arrayBuffer)
+    .from('uploads')
+    .download(`temp-uploads/${importId}.zip`);
+  if (error || !data) return null;
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
-/**
- * Retrieve metadata for an upload job
- */
-export async function getUploadJob(importId: string): Promise<UploadJob | null> {
-  const { data, error } = await supabase.storage
-    .from(TEMP_BUCKET)
-    .download(`${TEMP_PREFIX}${importId}.json`)
-
-  if (error || !data) return null
-  const text = await data.text()
-  return JSON.parse(text) as UploadJob
-}
-
-/**
- * Delete temp files for an upload job
- */
-export async function deleteUploadJob(importId: string): Promise<void> {
+async function deleteSupabaseUploadJob(importId: string): Promise<void> {
+  const { supabase } = await import('./supabase');
   await supabase.storage
-    .from(TEMP_BUCKET)
+    .from('uploads')
     .remove([
-      `${TEMP_PREFIX}${importId}.zip`,
-      `${TEMP_PREFIX}${importId}.json`,
-    ])
+      `temp-uploads/${importId}.zip`,
+      `temp-uploads/${importId}.json`,
+    ]);
 }
 
-/**
- * Check if an upload job exists
- */
-export async function hasUploadJob(importId: string): Promise<boolean> {
+async function hasSupabaseUploadJob(importId: string): Promise<boolean> {
+  const { supabase } = await import('./supabase');
   const { data, error } = await supabase.storage
-    .from(TEMP_BUCKET)
-    .list(TEMP_PREFIX, {
-      search: `${importId}.`,
-    })
+    .from('uploads')
+    .list('temp-uploads', { search: `${importId}.` });
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+}
 
-  if (error) return false
-  return (data?.length ?? 0) > 0
+// ========== PUBLIC API ==========
+
+export async function saveUploadJob(importId: string, zipBuffer: Buffer, metadata: UploadJob): Promise<void> {
+  if (STORAGE_MODE === 'local') {
+    return saveLocalUploadJob(importId, zipBuffer, metadata);
+  }
+  return saveSupabaseUploadJob(importId, zipBuffer, metadata);
+}
+
+export async function getUploadBuffer(importId: string): Promise<Buffer | null> {
+  if (STORAGE_MODE === 'local') {
+    return getLocalUploadBuffer(importId);
+  }
+  return getSupabaseUploadBuffer(importId);
+}
+
+export async function deleteUploadJob(importId: string): Promise<void> {
+  if (STORAGE_MODE === 'local') {
+    return deleteLocalUploadJob(importId);
+  }
+  return deleteSupabaseUploadJob(importId);
+}
+
+export async function hasUploadJob(importId: string): Promise<boolean> {
+  if (STORAGE_MODE === 'local') {
+    return hasLocalUploadJob(importId);
+  }
+  return hasSupabaseUploadJob(importId);
 }
