@@ -1,50 +1,60 @@
 // Upload utility - uploads ZIP directly to Supabase Storage from the browser
 // This avoids Vercel's 4.5MB body size limit
+// Uses the Supabase JS client for proper authentication and CORS handling
+
+import { createClient } from '@supabase/supabase-js'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kiydexwjjhzjynxddqhc.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_CyUCL1H-hxCENCFiSmAMeA_jqeo1R8i';
 
+// Lazy-initialized Supabase client for browser use
+let _browserClient: ReturnType<typeof createClient> | null = null;
+function getBrowserClient() {
+  if (!_browserClient) {
+    _browserClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return _browserClient;
+}
+
+interface UploadResult {
+  importId: string;
+  error?: string;
+}
+
 /**
- * Upload a file directly to Supabase Storage from the browser
- * Returns the importId that can be used for verify/compress/import
+ * Upload a ZIP file directly to Supabase Storage from the browser.
+ * Returns the importId that can be used for verify/compress/import.
  */
 export async function uploadZipToStorage(
   file: File,
   categoryCode: string,
   serieNumber: string,
   onProgress?: (percent: number) => void
-): Promise<{ importId: string; error?: string }> {
+): Promise<UploadResult> {
   const importId = `imp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
   try {
-    // Create a FormData for Supabase Storage upload
+    const client = getBrowserClient();
     const arrayBuffer = await file.arrayBuffer();
-    
-    // Use Supabase REST API directly (no SDK needed on client)
-    const supabasePath = `temp-uploads/${importId}.zip`;
-    const uploadUrl = `${SUPABASE_URL}/rest/v1/rpc/`; // Not used - use storage API directly
-    
-    // Actually use the Supabase Storage upload API
-    const storageUrl = `${SUPABASE_URL}/storage/v1/object/uploads/${supabasePath}`;
-    
-    const response = await fetch(storageUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': file.type || 'application/zip',
-        'x-upsert': 'true',
-        'Content-Length': file.size.toString(),
-      },
-      body: arrayBuffer,
-    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Storage upload error:', errorText);
-      return { importId, error: `Erreur d'upload: ${response.status}` };
+    // Upload ZIP file to temp-uploads/ in the 'uploads' bucket
+    const supabasePath = `temp-uploads/${importId}.zip`;
+    const { data: uploadData, error: uploadError } = await client.storage
+      .from('uploads')
+      .upload(supabasePath, arrayBuffer, {
+        contentType: 'application/zip',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      return {
+        importId,
+        error: `Erreur d'upload: ${uploadError.message}`
+      };
     }
 
-    // Also save metadata as JSON
+    // Save metadata as JSON file alongside the ZIP
     const metadata = JSON.stringify({
       categoryCode,
       serieNumber,
@@ -55,21 +65,24 @@ export async function uploadZipToStorage(
     });
 
     const metaPath = `temp-uploads/${importId}.json`;
-    const metaUrl = `${SUPABASE_URL}/storage/v1/object/uploads/${metaPath}`;
+    const { error: metaError } = await client.storage
+      .from('uploads')
+      .upload(metaPath, metadata, {
+        contentType: 'application/json',
+        upsert: true,
+      });
 
-    await fetch(metaUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-        'x-upsert': 'true',
-      },
-      body: metadata,
-    });
+    if (metaError) {
+      console.error('Metadata upload error (non-critical):', metaError);
+      // ZIP was uploaded OK, metadata failed - not critical for verification
+    }
 
     return { importId };
   } catch (error) {
     console.error('Upload error:', error);
-    return { importId, error: `Erreur: ${(error as Error).message}` };
+    return {
+      importId,
+      error: `Erreur réseau: ${(error as Error).message}`
+    };
   }
 }
