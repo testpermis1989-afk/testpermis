@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '@/lib/db';
-import { randomUUID } from 'crypto';
 import { uploadFile, getPublicUrl } from '@/lib/supabase';
-import { saveUploadJob, getUploadBuffer, getUploadJob, deleteUploadJob, hasUploadJob } from '@/lib/upload-store';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -17,65 +15,24 @@ const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
 };
 
-// POST /api/upload/rar - Upload, verify and extract ZIP file
+// POST /api/upload/rar - Upload, verify and import ZIP file (all in one request)
+// Vercel-compatible: no temp storage, no filesystem writes
 export async function POST(request: NextRequest) {
   try {
-    // Check if this is a JSON request (import from existing file)
     const contentType = request.headers.get('content-type') || '';
-    let importId: string | null = null;
-    let file: File | null = null;
-    let categoryCode: string | null = null;
-    let serieNumber: string | null = null;
-    let verifyOnly = false;
 
-    if (contentType.includes('application/json')) {
-      // JSON request: import from already uploaded file
-      const body = await request.json();
-      importId = body.importId || null;
-      categoryCode = body.category || null;
-      serieNumber = body.serie || null;
-      verifyOnly = false;
-    } else {
-      // FormData request: new upload or verification
-      const formData = await request.formData();
-      file = formData.get('file') as File;
-      categoryCode = formData.get('category') as string;
-      serieNumber = formData.get('serie') as string;
-      verifyOnly = formData.get('verifyOnly') === 'true';
-      importId = formData.get('importId') as string;
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json({ error: 'Utilisez FormData pour uploader un fichier' }, { status: 400 });
     }
 
-    // MODE 2: Import from already uploaded file (no re-upload!)
-    if (importId) {
-      const jobExists = await hasUploadJob(importId);
-      if (jobExists) {
-        const zipBuffer = await getUploadBuffer(importId);
-        const job = await getUploadJob(importId);
-
-        if (!zipBuffer || !job) {
-          await deleteUploadJob(importId);
-          return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
-        }
-
-        try {
-          const verification = verifyZipBuffer(zipBuffer);
-          if (!verification.isValid) {
-            await deleteUploadJob(importId);
-            return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
-          }
-
-          const result = await extractAndImport(zipBuffer, job.categoryCode, parseInt(job.serieNumber));
-          await deleteUploadJob(importId);
-          return NextResponse.json({ success: true, ...result });
-        } catch (error) {
-          await deleteUploadJob(importId);
-          return NextResponse.json({ error: 'Import failed: ' + (error as Error).message }, { status: 500 });
-        }
-      }
-    }
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+    const categoryCode = formData.get('category') as string;
+    const serieNumber = formData.get('serie') as string;
+    const verifyOnly = formData.get('verifyOnly') === 'true';
 
     if (!file || !categoryCode || !serieNumber) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+      return NextResponse.json({ error: 'Champs manquants' }, { status: 400 });
     }
 
     const fileName = file.name.toLowerCase();
@@ -83,12 +40,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Seuls les fichiers ZIP sont acceptés' }, { status: 400 });
     }
 
-    const jobId = randomUUID();
-
-    // Save ZIP to buffer in memory
+    // Read ZIP into buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Verify ZIP from buffer
+    // Verify ZIP
     let verification;
     try {
       verification = verifyZipBuffer(buffer);
@@ -109,46 +64,29 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Store buffer in Supabase temp storage (persists between serverless invocations)
-    try {
-      await saveUploadJob(jobId, buffer, {
-        categoryCode,
-        serieNumber,
-        fileName: file.name,
-        fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-        verified: verification.isValid,
-        createdAt: Date.now(),
-      });
-    } catch (saveErr) {
-      console.error('Failed to save temp upload:', saveErr);
-      // Fallback: proceed with direct import if temp storage fails
-      if (verification.isValid) {
-        const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
-        return NextResponse.json({ success: true, ...result });
-      }
-      return NextResponse.json({ error: 'Erreur de stockage temporaire' }, { status: 500 });
-    }
-
+    // If verifyOnly, return verification without importing
     if (verifyOnly) {
       return NextResponse.json({
         success: true,
         mode: 'verification',
-        importId: jobId,
         fileName: file.name,
         fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
         verification
       });
     }
 
-    // Direct import (no verification step)
+    // If verification failed, return errors
     if (!verification.isValid) {
-      await deleteUploadJob(jobId);
       return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
     }
 
+    // Import directly (everything in one request!)
     const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
-    await deleteUploadJob(jobId);
-    return NextResponse.json({ success: true, ...result });
+    return NextResponse.json({
+      success: true,
+      verification,
+      ...result
+    });
 
   } catch (error) {
     console.error('Upload error:', error);
@@ -175,9 +113,6 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
     let stripParent = '';
     if (topLevelDirs.size === 1) stripParent = [...topLevelDirs][0] + '/';
 
-    // Build a map of question files found during extraction
-    const questionFiles = new Map<number, { image?: string; audio?: string; video?: string }>();
-
     for (const entry of entries) {
       if (entry.isDirectory) continue;
 
@@ -189,7 +124,7 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
       }
       const baseNameOriginal = path.basename(entryNameFull);
 
-      // TXT file - read content for question processing
+      // TXT file
       if (entryName.endsWith('.txt') && (
         entryName.includes('reponse') || entryName.includes('response') ||
         entryName.includes('answer') || entryName.includes('question') ||
@@ -205,7 +140,6 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
         continue;
       }
 
-      // Extract file data and determine its type
       let fileData: Buffer;
       try {
         fileData = entry.getData();
@@ -214,17 +148,12 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
       }
 
       if (isQuestionImage(entryName, entryNameFull)) {
-        const qNum = extractQuestionNumber(baseNameOriginal);
         const storagePath = `${storagePrefix}/images/${baseNameOriginal}`;
         const ext = path.extname(baseNameOriginal).toLowerCase();
         const mime = MIME_TYPES[ext] || 'image/png';
         try {
           await uploadFile(storagePath, fileData, mime);
           extractedFiles.images++;
-          if (qNum) {
-            const existing = questionFiles.get(qNum) || {};
-            questionFiles.set(qNum, { ...existing, image: storagePath });
-          }
         } catch (err) {
           console.error(`Failed to upload image ${baseNameOriginal}:`, err);
         }
@@ -245,16 +174,10 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
       }
 
       if (isAudioFile(entryName, entryNameFull)) {
-        const qNum = extractQuestionNumber(baseNameOriginal);
         const storagePath = `${storagePrefix}/audio/${baseNameOriginal}`;
-        const mime = MIME_TYPES['.mp3'] || 'audio/mpeg';
         try {
-          await uploadFile(storagePath, fileData, mime);
+          await uploadFile(storagePath, fileData, 'audio/mpeg');
           extractedFiles.audio++;
-          if (qNum) {
-            const existing = questionFiles.get(qNum) || {};
-            questionFiles.set(qNum, { ...existing, audio: storagePath });
-          }
         } catch (err) {
           console.error(`Failed to upload audio ${baseNameOriginal}:`, err);
         }
@@ -262,16 +185,10 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
       }
 
       if (isVideoFile(entryName, entryNameFull)) {
-        const qNum = extractQuestionNumber(baseNameOriginal);
         const storagePath = `${storagePrefix}/video/${baseNameOriginal}`;
-        const mime = MIME_TYPES['.mp4'] || 'video/mp4';
         try {
-          await uploadFile(storagePath, fileData, mime);
+          await uploadFile(storagePath, fileData, 'video/mp4');
           extractedFiles.video++;
-          if (qNum) {
-            const existing = questionFiles.get(qNum) || {};
-            questionFiles.set(qNum, { ...existing, video: storagePath });
-          }
         } catch (err) {
           console.error(`Failed to upload video ${baseNameOriginal}:`, err);
         }
@@ -279,7 +196,7 @@ async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNu
       }
     }
 
-    // Process TXT file and create database entries
+    // Process TXT and create DB entries
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
       questionsImported = await processTxtContent(extractedFiles.txtFile, categoryCode, serieNumber, storagePrefix);
     }
@@ -326,12 +243,10 @@ async function processTxtContent(txtContent: string, categoryCode: string, serie
     const correctAnswers = parts[1];
     if (isNaN(questionNumber)) continue;
 
-    // Build storage paths using the Supabase storage prefix
     const imageStoragePath = `${storagePrefix}/images`;
     const audioStoragePath = `${storagePrefix}/audio`;
     const videoStoragePath = `${storagePrefix}/video`;
 
-    // Try to find matching files - search both q{n}.ext and {n}.ext patterns
     const imageFile = await findFileInStorage(imageStoragePath, questionNumber, ['q', '']);
     const audioFile = await findFileInStorage(audioStoragePath, questionNumber, ['q', ''], ['mp3']);
     const videoFile = await findFileInStorage(videoStoragePath, questionNumber, ['q', ''], ['mp4']);
@@ -362,7 +277,8 @@ async function processTxtContent(txtContent: string, categoryCode: string, serie
 // Find a file in Supabase Storage folder
 async function findFileInStorage(folder: string, num: number, prefixes: string[], exts?: string[]): Promise<string | null> {
   try {
-    const { data, error } = await import('@/lib/supabase').then(m => m.supabase.storage.from('uploads').list(folder));
+    const { supabase } = await import('@/lib/supabase');
+    const { data, error } = await supabase.storage.from('uploads').list(folder);
     if (error || !data || data.length === 0) return null;
 
     const defaultExts = exts || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
@@ -416,7 +332,6 @@ function verifyZipBuffer(zipBuffer: Buffer) {
     return result;
   }
 
-  // Auto-detect parent folder
   const topLevelDirs = new Set<string>();
   for (const entry of entries) {
     const parts = entry.entryName.split('/').filter(Boolean);
@@ -450,7 +365,6 @@ function verifyZipBuffer(zipBuffer: Buffer) {
       continue;
     }
 
-    // TXT file
     if (entryName.endsWith('.txt') && !txtFound) {
       try {
         txtContent = fileData.toString('utf-8');
@@ -507,7 +421,6 @@ function verifyZipBuffer(zipBuffer: Buffer) {
     }
   }
 
-  // Parse TXT
   if (!txtFound) {
     result.errors.push('Aucun fichier TXT trouvé (reponses.txt)');
     result.isValid = false;
@@ -570,26 +483,26 @@ function verifyZipBuffer(zipBuffer: Buffer) {
 function validateImageFile(data: Buffer, filename: string): boolean {
   if (data.length < 8) return false;
   const h = data.slice(0, 16);
-  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true; // PNG
-  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true; // JPEG
-  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true; // GIF
-  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true; // WebP
-  if (h[0] === 0x42 && h[1] === 0x4D) return true; // BMP
+  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true;
+  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true;
+  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true;
+  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true;
+  if (h[0] === 0x42 && h[1] === 0x4D) return true;
   return false;
 }
 
 function validateMp3File(data: Buffer, filename: string): boolean {
   if (data.length < 10) return false;
-  if (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) return true; // ID3
-  if (data[0] === 0xFF && (data[1] & 0xE0) === 0xE0) return true; // MP3 sync
+  if (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) return true;
+  if (data[0] === 0xFF && (data[1] & 0xE0) === 0xE0) return true;
   return false;
 }
 
 function validateMp4File(data: Buffer, filename: string): boolean {
   if (data.length < 12) return false;
-  if (data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70) return true; // ftyp
-  if (data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76) return true; // moov
-  if (data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74) return true; // mdat
+  if (data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70) return true;
+  if (data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76) return true;
+  if (data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74) return true;
   return false;
 }
 

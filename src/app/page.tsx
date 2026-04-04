@@ -2844,29 +2844,37 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
       const data = await res.json();
 
-      // Always show verification modal if we have verification data (even with errors)
-      if (data.verification) {
-        // Sauvegarder l'ID du fichier uploadé (pas besoin de re-uploader!)
-        if (data.importId) setPendingImportId(data.importId);
+      // Server now imports directly in one request
+      if (data.success && data.extracted) {
+        // Already imported! Show success result
+        const ext = data.extracted;
+        const details = [
+          `📷 Images: ${ext.images}`,
+          `🎵 Audio MP3: ${ext.audio}`,
+          `🎬 Vidéo MP4: ${ext.video}`,
+          `🖼️ Réponses: ${ext.responses}`,
+          `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
+          `📝 Questions importées: ${data.questionsImported || 0}`
+        ].join('\n');
+        setMediaResult({ success: true, message: `✅ ${data.message}\n\n${details}` });
+        loadSeriesData();
+        setActiveTab('series');
+      } else if (data.verification && !data.verification.isValid) {
+        // Verification failed - show errors
         setVerificationResult(data.verification);
         setShowVerificationModal(true);
-
-        // Skip compression - import directly
-        if (data.verification.isValid && data.importId) {
-          setCompressBeforeImport(null);
-          // Auto-import directly without compression
-          handleImport(data.importId);
+      } else if (data.error) {
+        let errorMsg = '❌ Erreur:\n\n';
+        errorMsg += `• ${data.error}\n`;
+        if (data.verification) {
+          setVerificationResult(data.verification);
+          setShowVerificationModal(true);
+        } else {
+          errorMsg += '\nConseils:\n• Assurez-vous que le fichier est un ZIP valide\n• Vérifiez que le ZIP contient un fichier .txt avec les réponses';
+          setMediaResult({ success: false, message: errorMsg });
         }
-      } else if (data.success) {
-        setMediaResult({ success: false, message: '❌ Aucune donnée de vérification reçue' });
       } else {
-        // Show detailed error with all available information
-        let errorMsg = '❌ Erreur de vérification:\n\n';
-        if (data.error) errorMsg += `• ${data.error}\n`;
-        if (data.details) errorMsg += `• ${data.details}\n`;
-        if (!data.error && !data.details) errorMsg += '• Erreur inconnue - vérifiez le fichier ZIP\n';
-        errorMsg += '\nConseils:\n• Assurez-vous que le fichier est un ZIP valide\n• Vérifiez que le ZIP contient un fichier .txt avec les réponses';
-        setMediaResult({ success: false, message: errorMsg });
+        setMediaResult({ success: false, message: '❌ Erreur inconnue' });
       }
     } catch (err) {
       const errorMessage = (err as Error).message || 'Erreur inconnue';
@@ -3022,6 +3030,8 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
     setUploadingMedia(true);
     setMediaResult(null);
+    setCompressBeforeImport(null);
+    setPendingImportId(null);
 
     const formData = new FormData();
     formData.append('file', mediaFile);
@@ -3618,30 +3628,8 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         onClick={handleCancelVerification}
                         className="px-5 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-bold"
                       >
-                        ❌ Annuler
+                        ❌ Fermer
                       </button>
-                      {verificationResult.isValid && (
-                        <button
-                          onClick={handleConfirmImport}
-                          disabled={uploadingMedia || (compressBeforeImport?.loading ?? false) || !compressBeforeImport?.done}
-                          className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold disabled:opacity-50 transition-colors"
-                          title={!compressBeforeImport?.done ? 'Veuillez attendre la fin de la compression' : undefined}
-                        >
-                          {uploadingMedia ? (
-                            <span className="flex items-center gap-2">
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Import...
-                            </span>
-                          ) : !compressBeforeImport?.done ? (
-                            <span className="flex items-center gap-2">
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Compression...
-                            </span>
-                          ) : (
-                            `✅ Confirmer l'import (compressé)`
-                          )}
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
