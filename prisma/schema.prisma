@@ -3,65 +3,65 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
 }
 
 model User {
-  id              String   @id @default(cuid())
-  cin             String   @unique
-  password        String   @default("1234")
+  id              String       @id @default(cuid())
+  cin             String       @unique
+  password        String       @default("1234")
   nomFr           String?
   prenomFr        String?
   nomAr           String?
   prenomAr        String?
   photo           String?
-  permisCategory  String   @default("B")
+  permisCategory  String       @default("B")
   examDate        String?
-  pinCode         String   @default("")
-  isActive        Boolean  @default(true)
-  role            String   @default("user")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  pinCode         String       @default("")
+  isActive        Boolean      @default(true)
+  role            String       @default("user")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
   testResults     TestResult[]
 }
 
 model Category {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String     @id @default(cuid())
+  code        String     @unique
   name        String
   nameAr      String?
-  seriesCount Int      @default(10)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  seriesCount Int        @default(10)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
   series      Serie[]
 }
 
 model Serie {
-  id             String     @id @default(cuid())
+  id             String   @id @default(cuid())
   number         Int
   categoryId     String
-  questionsCount Int        @default(0)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  questionsCount Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   questions      Question[]
-  category       Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category       Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, number])
 }
 
 model Question {
-  id        String     @id @default(cuid())
+  id        String    @id @default(cuid())
   serieId   String
   order     Int
   text      String?
   image     String?
   audio     String?
   video     String?
-  duration  Int        @default(30)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  serie     Serie      @relation(fields: [serieId], references: [id], onDelete: Cascade)
+  duration  Int       @default(30)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  serie     Serie     @relation(fields: [serieId], references: [id], onDelete: Cascade)
   responses Response[]
 
   @@unique([serieId, order])
@@ -75,7 +75,7 @@ model Response {
   image      String?
   isCorrect  Boolean  @default(false)
   createdAt  DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt  DateTime @updatedAt
   question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@unique([questionId, order])
