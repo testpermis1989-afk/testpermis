@@ -325,3 +325,23 @@ Stage Summary:
 - Server auto-selects compressed version if available when importing
 - ESLint passes clean, pushed to GitHub for Vercel auto-deploy
 - IMPORTANT: User must verify NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set in Vercel env vars
+---
+Task ID: 1
+Agent: main
+Task: Fix upload 400 error when importing ZIP series on Vercel
+
+Work Log:
+- User reported "erreur d'upload : 400" when trying to import a ZIP series
+- Investigated the upload flow: handleVerify → client-upload.ts (browser) → Supabase Storage
+- Found root cause: client-upload.ts used raw fetch to Supabase Storage REST API without the required `apikey` header
+- Supabase Storage API requires BOTH `Authorization: Bearer <key>` AND `apikey: <key>` headers
+- Rewrote client-upload.ts to use @supabase/supabase-js SDK instead of raw fetch, which handles auth properly
+- Also updated .env with NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY for local development
+- Pushed fix to both GitHub repos (testpermis1989-afk/testpermis and mgktransport/testpermis)
+- Verified Vercel deployment via curl (API returns correct error messages)
+
+Stage Summary:
+- Fixed: client-upload.ts now uses Supabase JS client SDK (proper auth handling)
+- Fixed: .env now includes Supabase env vars
+- Both repos pushed, Vercel redeployed successfully
+- Key change: src/lib/client-upload.ts rewritten to use createClient() instead of raw fetch
