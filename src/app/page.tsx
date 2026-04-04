@@ -2814,19 +2814,25 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setVerifying(true);
     setVerificationResult(null);
 
-    const formData = new FormData();
-    formData.append('file', mediaFile);
-    formData.append('category', category);
-    formData.append('serie', serie.toString());
-    formData.append('verifyOnly', 'true');
-
     try {
+      // Step 1: Upload ZIP directly to Supabase Storage (from browser) - avoids Vercel 4.5MB limit
+      const { uploadZipToStorage } = await import('@/lib/client-upload');
+      const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
+
+      if (uploadError) {
+        setMediaResult({ success: false, message: `❌ Erreur d'upload: ${uploadError}` });
+        setVerifying(false);
+        return;
+      }
+
+      // Step 2: Tell server to verify from Supabase Storage
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
 
-      const res = await fetch('/api/upload/rar', {
+      const res = await fetch('/api/upload/rar/verify', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ importId }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -2837,8 +2843,9 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         const text = await res.text();
         setMediaResult({
           success: false,
-          message: `❌ Erreur serveur (HTTP ${res.status}):\n\n• Le serveur n'a pas renvoyé de JSON\n• Vérifiez que le fichier n'est pas trop gros\n• Essayez avec un fichier ZIP plus petit (< 50MB)\n\nDétails: ${text.substring(0, 200)}`
+          message: `❌ Erreur serveur (HTTP ${res.status}):\n\nDétails: ${text.substring(0, 300)}`
         });
+        setVerifying(false);
         return;
       }
 
@@ -2858,25 +2865,16 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         setMediaResult({ success: true, message: `✅ ${data.message}\n\n${details}` });
         loadSeriesData();
         setActiveTab('series');
-      } else if (data.success && data.mode === 'verification' && data.verification) {
-        // Verification mode - save importId and show modal
-        if (data.importId) {
-          setPendingImportId(data.importId);
-        }
-        setVerificationResult(data.verification);
-        setShowVerificationModal(true);
-      } else if (data.verification && !data.verification.isValid) {
-        // Verification failed - show errors
-        if (data.importId) {
-          setPendingImportId(data.importId);
-        }
+      } else if (data.verification) {
+        // Verification result - save importId and show modal
+        if (importId) setPendingImportId(importId);
         setVerificationResult(data.verification);
         setShowVerificationModal(true);
       } else if (data.error) {
         let errorMsg = '❌ Erreur:\n\n';
         errorMsg += `• ${data.error}\n`;
         if (data.verification) {
-          if (data.importId) setPendingImportId(data.importId);
+          if (importId) setPendingImportId(importId);
           setVerificationResult(data.verification);
           setShowVerificationModal(true);
         } else {
@@ -2971,7 +2969,15 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         const text = await res.text();
-        setMediaResult({ success: false, message: `❌ Erreur serveur (HTTP ${res.status})\n\n${text.substring(0, 200)}` });
+        let hint = '';
+        if (res.status === 500) {
+          hint = '\n\n⚠️ Le serveur a rencontré une erreur interne.\n• Le fichier ZIP est peut-être trop gros\n• Timeout du serveur (essayez un ZIP plus petit)\n• Vérifiez que le ZIP est valide';
+        } else if (res.status === 504) {
+          hint = '\n\n⏰ Timeout du serveur - le traitement a pris trop longtemps.\n• Utilisez un ZIP plus petit (< 20MB)\n• Essayez avec moins de fichiers';
+        } else if (res.status === 413) {
+          hint = '\n\n📦 Fichier trop gros pour le serveur.\n• Vercel limite la taille à 4.5MB\n• Compressez votre ZIP avant de l\'uploader';
+        }
+        setMediaResult({ success: false, message: `❌ Erreur serveur (HTTP ${res.status}):${hint}\n\nDétails: ${text.substring(0, 300)}` });
         return;
       }
 
@@ -3034,7 +3040,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setCompressBeforeImport(null);
   };
 
-  // Handle media file upload (RAR/ZIP)
+  // Handle media file upload - uploads ZIP directly to Supabase Storage (bypasses Vercel 4.5MB limit)
   const handleMediaUpload = async (skipVerify = false) => {
     if (!mediaFile) return;
 
@@ -3043,30 +3049,44 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setCompressBeforeImport(null);
     setPendingImportId(null);
 
-    const formData = new FormData();
-    formData.append('file', mediaFile);
-    formData.append('category', category);
-    formData.append('serie', serie.toString());
-
     try {
+      // Step 1: Upload ZIP directly to Supabase Storage (from browser)
+      setMediaResult({ success: false, message: '📤 Upload vers le stockage en cours...' });
+
+      const { uploadZipToStorage } = await import('@/lib/client-upload');
+      const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
+
+      if (uploadError) {
+        setMediaResult({ success: false, message: `❌ ${uploadError}` });
+        return;
+      }
+
+      // Step 2: Tell server to import from Supabase Storage
+      setMediaResult({ success: false, message: '📥 Importation depuis le stockage...' });
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
 
       const res = await fetch('/api/upload/rar', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          importId,
+          category,
+          serie: serie.toString(),
+        }),
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
-      // Vérifier que la réponse est du JSON
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         const text = await res.text();
-        setMediaResult({
-          success: false,
-          message: `❌ Erreur serveur (HTTP ${res.status}):\n\n• Le fichier est peut-être trop gros\n• Essayez avec un ZIP plus petit (< 50MB)\n\nDétails: ${text.substring(0, 200)}`
-        });
+        let hint = '';
+        if (res.status === 500) hint = '\n\n⚠️ Erreur interne serveur.\n• ZIP trop gros ou invalide\n• Timeout serveur (ZIP plus petit requis)';
+        else if (res.status === 504) hint = '\n\n⏰ Timeout serveur.\n• Utilisez un ZIP plus petit';
+        else if (res.status === 413) hint = '\n\n📦 Fichier trop gros.';
+        setMediaResult({ success: false, message: `❌ Erreur serveur (HTTP ${res.status}):${hint}\n\nDétails: ${text.substring(0, 300)}` });
         return;
       }
 
@@ -3085,9 +3105,9 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         
         setMediaResult({ 
           success: true, 
-          message: `✅ ${data.message}\n📁 Fichier: ${data.fileName} (${data.fileSize})\n\n${details}` 
+          message: `✅ ${data.message}\n\n${details}` 
         });
-        loadSeriesData(); // Refresh series list
+        loadSeriesData();
       } else {
         setMediaResult({ success: false, message: `❌ Erreur: ${data.error}` });
       }
@@ -3097,8 +3117,8 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       setMediaResult({
         success: false,
         message: isTimeout
-          ? `❌ Timeout - Le serveur a mis trop longtemps à répondre\n\nConseils:\n• Essayez avec un fichier ZIP plus petit (< 50MB)\n• Découpez votre ZIP en plusieurs fichiers plus petits`
-          : `❌ Erreur de connexion:\n\n• ${errorMessage}\n\n• Le fichier est peut-être trop gros`
+          ? `❌ Timeout - Le traitement a pris trop longtemps\n\nConseils:\n• Essayez avec un ZIP plus petit (< 20MB)`
+          : `❌ Erreur de connexion:\n\n• ${errorMessage}`
       });
     } finally {
       setUploadingMedia(false);

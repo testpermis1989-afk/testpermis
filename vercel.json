@@ -1,9 +1,35 @@
 {
   "framework": "nextjs",
   "buildCommand": "npx prisma generate && next build",
-  "installCommand": "npm install",
+  "installCommand": "npm install --legacy-peer-deps",
   "outputDirectory": ".next",
   "regions": ["cdg1"],
+  "functions": {
+    "src/app/api/upload/rar/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/upload/rar/compress/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/upload/rar/repair/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/upload/rar/verify/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/admin/download/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/admin/compress/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/series/repair/route.ts": {
+      "maxDuration": 120
+    },
+    "src/app/api/upload/photo/route.ts": {
+      "maxDuration": 30
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
