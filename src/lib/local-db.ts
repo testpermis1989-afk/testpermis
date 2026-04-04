@@ -1,7 +1,9 @@
-// Local database adapter using better-sqlite3 (for Electron / local mode)
+// Local database adapter using sql.js (pure JavaScript/WASM SQLite)
+// No native compilation needed - works everywhere including Electron
 // This provides the same interface as Prisma for common operations
 
-import Database from 'better-sqlite3';
+import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
+import fs from 'fs';
 import path from 'path';
 
 const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
@@ -18,21 +20,187 @@ function getDbPath(): string {
   return path.join(/*turbopackIgnore: true*/ DATA_DIR, 'permis.db');
 }
 
-let _db: Database.Database | null = null;
+// =====================================================
+// sql.js wrapper - mimics better-sqlite3 API (async)
+// =====================================================
 
-function getDb(): Database.Database {
+let _sqlJsFactory: any = null;
+let _sqlJsInitPromise: Promise<any> | null = null;
+
+async function getSqlJs() {
+  if (_sqlJsFactory) return _sqlJsFactory;
+  if (!_sqlJsInitPromise) {
+    // Try to locate the WASM binary
+    const wasmSearchPaths = [
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', 'sql-wasm.wasm'),
+      path.join(__dirname, '..', '..', '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+    ];
+
+    let wasmPath: string | undefined;
+    for (const p of wasmSearchPaths) {
+      if (fs.existsSync(p)) {
+        wasmPath = p;
+        break;
+      }
+    }
+
+    if (wasmPath) {
+      const wasmBuffer = fs.readFileSync(wasmPath);
+      _sqlJsInitPromise = initSqlJs({ wasmBinary: new Uint8Array(wasmBuffer) });
+    } else {
+      // Fallback: let sql.js find the WASM file itself
+      _sqlJsInitPromise = initSqlJs();
+    }
+  }
+  _sqlJsFactory = await _sqlJsInitPromise;
+  return _sqlJsFactory;
+}
+
+interface PreparedStmt {
+  get(...params: any[]): Promise<Record<string, any> | undefined>;
+  all(...params: any[]): Promise<Record<string, any>[]>;
+  run(...params: any[]): Promise<{ changes: number }>;
+}
+
+class Database {
+  private db: SqlJsDatabase | null = null;
+  private dbPath: string;
+  private dirty = false;
+  private saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(dbPath: string) {
+    this.dbPath = dbPath;
+    // Ensure directory exists
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  async init() {
+    if (this.db) return;
+    const SQL = await getSqlJs();
+    let buffer: Uint8Array | undefined;
+    try {
+      if (fs.existsSync(this.dbPath)) {
+        buffer = new Uint8Array(fs.readFileSync(this.dbPath));
+      }
+    } catch (e) {
+      console.warn('Could not load existing database, creating new one:', e);
+    }
+    this.db = new SQL.Database(buffer);
+  }
+
+  async pragma(statement: string): Promise<void> {
+    await this.init();
+    try {
+      this.db!.run(`PRAGMA ${statement}`);
+    } catch (e) {
+      // Some pragmas like WAL are not supported by sql.js - silently ignore
+      console.debug(`Pragma "${statement}" not supported or failed:`, e);
+    }
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.init();
+    this.db!.run(sql);
+    this.markDirty();
+  }
+
+  async prepare(sql: string): Promise<PreparedStmt> {
+    await this.init();
+    const stmt = this.db!.prepare(sql);
+    // Arrow functions capture `this` from enclosing Database method scope
+    return {
+      async get(...params: any[]): Promise<Record<string, any> | undefined> {
+        try {
+          if (params.length > 0) stmt.bind(params as any[]);
+          if (stmt.step()) {
+            return stmt.getAsObject();
+          }
+          return undefined;
+        } finally {
+          stmt.free();
+        }
+      },
+      async all(...params: any[]): Promise<Record<string, any>[]> {
+        try {
+          const results: Record<string, any>[] = [];
+          if (params.length > 0) stmt.bind(params as any[]);
+          while (stmt.step()) {
+            results.push(stmt.getAsObject());
+          }
+          return results;
+        } finally {
+          stmt.free();
+        }
+      },
+      async run(...params: any[]): Promise<{ changes: number }> {
+        try {
+          if (params.length > 0) stmt.bind(params as any[]);
+          stmt.step();
+          const changes = this.db!.getRowsModified();
+          this.markDirty();
+          return { changes };
+        } finally {
+          stmt.free();
+        }
+      }
+    };
+  }
+
+  private markDirty() {
+    if (this.dirty) return;
+    this.dirty = true;
+    // Debounced save
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+    this.saveTimeout = setTimeout(() => {
+      this.save();
+      this.dirty = false;
+      this.saveTimeout = null;
+    }, 500);
+  }
+
+  save(): void {
+    if (!this.db) return;
+    try {
+      const data = this.db.export();
+      const dir = path.dirname(this.dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.dbPath, Buffer.from(data));
+    } catch (e) {
+      console.error('Failed to save database:', e);
+    }
+  }
+
+  close(): void {
+    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+    if (this.db) {
+      this.save();
+      this.db.close();
+      this.db = null;
+    }
+  }
+}
+
+let _db: Database | null = null;
+
+async function getDb(): Promise<Database> {
   if (!_db) {
     const dbPath = getDbPath();
     _db = new Database(dbPath);
-    _db.pragma('journal_mode = WAL');
-    _db.pragma('foreign_keys = ON');
-    initTables(_db);
+    await _db.pragma('journal_mode = WAL');
+    await _db.pragma('foreign_keys = ON');
+    await initTables(_db);
   }
   return _db;
 }
 
-function initTables(db: Database.Database): void {
-  db.exec(`
+async function initTables(db: Database): Promise<void> {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS "User" (
       "id" TEXT PRIMARY KEY,
       "cin" TEXT NOT NULL UNIQUE,
@@ -129,41 +297,44 @@ function cuid(): string {
 
 // =====================================================
 // LOCAL DB - provides same interface as Prisma db
+// All methods are async (compatible with Prisma's Promise-based API)
 // =====================================================
 
 export const localDb = {
   // Users
   user: {
-    findUnique: (args: { where: { id?: string; cin?: string } }) => {
-      const db = getDb();
+    findUnique: async (args: { where: { id?: string; cin?: string } }) => {
+      const db = await getDb();
       if (args.where.id) {
-        const row = db.prepare('SELECT * FROM "User" WHERE id = ?').get(args.where.id) as any;
+        const row = await (await db.prepare('SELECT * FROM "User" WHERE id = ?')).get(args.where.id);
         return row ? { ...row, isActive: bool(row.isActive) } : null;
       }
       if (args.where.cin) {
-        const row = db.prepare('SELECT * FROM "User" WHERE cin = ?').get(args.where.cin) as any;
+        const row = await (await db.prepare('SELECT * FROM "User" WHERE cin = ?')).get(args.where.cin);
         return row ? { ...row, isActive: bool(row.isActive) } : null;
       }
       return null;
     },
-    findMany: (args?: { where?: { isActive?: boolean } }) => {
-      const db = getDb();
+    findMany: async (args?: { where?: { isActive?: boolean }; orderBy?: any; select?: any }) => {
+      const db = await getDb();
       let sql = 'SELECT * FROM "User"';
       const params: any[] = [];
       if (args?.where?.isActive !== undefined) {
         sql += ' WHERE isActive = ?';
         params.push(args.where.isActive ? 1 : 0);
       }
-      const rows = db.prepare(sql).all(...params) as any[];
-      return rows.map(r => ({ ...r, isActive: bool(r.isActive) }));
+      sql += ' ORDER BY createdAt DESC';
+      const rows = await (await db.prepare(sql)).all(...params);
+      return rows.map((r: any) => ({ ...r, isActive: bool(r.isActive) }));
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      const sql = `INSERT INTO "User" (id, cin, password, nomFr, prenomFr, nomAr, prenomAr, photo, permisCategory, examDate, pinCode, isActive, role, createdAt, updatedAt) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-      db.prepare(sql).run(
+      await (await db.prepare(
+        `INSERT INTO "User" (id, cin, password, nomFr, prenomFr, nomAr, prenomAr, photo, permisCategory, examDate, pinCode, isActive, role, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(
         id, args.data.cin, args.data.password || '1234',
         args.data.nomFr || null, args.data.prenomFr || null,
         args.data.nomAr || null, args.data.prenomAr || null,
@@ -174,9 +345,9 @@ export const localDb = {
       );
       return { ...args.data, id, createdAt: now, updatedAt: now, isActive: args.data.isActive !== false };
     },
-    update: (args: { where: { id?: string; cin?: string }; data: any }) => {
-      const db = getDb();
-      const user = localDb.user.findUnique({ where: args.where });
+    update: async (args: { where: { id?: string; cin?: string }; data: any }) => {
+      const db = await getDb();
+      const user = await localDb.user.findUnique({ where: args.where });
       if (!user) throw new Error('User not found');
       const sets: string[] = [];
       const params: any[] = [];
@@ -194,49 +365,79 @@ export const localDb = {
       sets.push('"updatedAt" = ?');
       params.push(new Date().toISOString());
       params.push(user.id);
-      db.prepare(`UPDATE "User" SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      await (await db.prepare(`UPDATE "User" SET ${sets.join(', ')} WHERE id = ?`)).run(...params);
       return localDb.user.findUnique({ where: { id: user.id } });
     },
-    deleteMany: (args: { where: any }) => {
-      const db = getDb();
+    delete: async (args: { where: { id?: string; cin?: string } }) => {
+      const db = await getDb();
+      if (args.where.cin) {
+        await (await db.prepare('DELETE FROM "User" WHERE cin = ?')).run(args.where.cin);
+      } else if (args.where.id) {
+        await (await db.prepare('DELETE FROM "User" WHERE id = ?')).run(args.where.id);
+      }
+    },
+    deleteMany: async (args: { where: any }) => {
+      const db = await getDb();
       if (args.where?.cin) {
-        return db.prepare('DELETE FROM "User" WHERE cin = ?').run(args.where.cin);
+        await (await db.prepare('DELETE FROM "User" WHERE cin = ?')).run(args.where.cin);
       }
       return { count: 0 };
     },
-    count: (args?: { where?: any }) => {
-      const db = getDb();
-      const result = db.prepare('SELECT COUNT(*) as count FROM "User"').get() as any;
-      return result.count;
+    count: async (args?: { where?: any }) => {
+      const db = await getDb();
+      const sql = args?.where?.role
+        ? 'SELECT COUNT(*) as count FROM "User" WHERE role = ?'
+        : 'SELECT COUNT(*) as count FROM "User"';
+      const params = args?.where?.role ? [args.where.role] : [];
+      const result = await (await db.prepare(sql)).get(...params);
+      return result?.count || 0;
     },
   },
 
   // Categories
   category: {
-    findUnique: (args: { where: { id?: string; code?: string } }) => {
-      const db = getDb();
+    findUnique: async (args: { where: { id?: string; code?: string }; include?: any }) => {
+      const db = await getDb();
       if (args.where.code) {
-        return db.prepare('SELECT * FROM "Category" WHERE code = ?').get(args.where.code) as any;
+        const row = await (await db.prepare('SELECT * FROM "Category" WHERE code = ?')).get(args.where.code);
+        if (!row) return null;
+        if (args.include?.series) {
+          return { ...row, series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions }) };
+        }
+        return row;
       }
       if (args.where.id) {
-        return db.prepare('SELECT * FROM "Category" WHERE id = ?').get(args.where.id) as any;
+        const row = await (await db.prepare('SELECT * FROM "Category" WHERE id = ?')).get(args.where.id);
+        if (!row) return null;
+        if (args.include?.series) {
+          return { ...row, series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions }) };
+        }
+        return row;
       }
       return null;
     },
-    findMany: () => {
-      const db = getDb();
-      return db.prepare('SELECT * FROM "Category"').all() as any[];
+    findMany: async (args?: { include?: any; orderBy?: any }) => {
+      const db = await getDb();
+      const rows = await (await db.prepare('SELECT * FROM "Category" ORDER BY code')).all();
+      if (args?.include?.series) {
+        return Promise.all(rows.map(async (row: any) => ({
+          ...row,
+          series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions, _includeCount: !!args.include.series._count })
+        })));
+      }
+      return rows;
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO "Category" (id, code, name, nameAr, seriesCount, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, args.data.code, args.data.name, args.data.nameAr || null, args.data.seriesCount || 10, now, now);
+      await (await db.prepare(
+        `INSERT INTO "Category" (id, code, name, nameAr, seriesCount, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.code, args.data.name, args.data.nameAr || null, args.data.seriesCount || 10, now, now);
       return { ...args.data, id, createdAt: now, updatedAt: now };
     },
-    update: (args: { where: { id: string }; data: any }) => {
-      const db = getDb();
+    update: async (args: { where: { id: string }; data: any }) => {
+      const db = await getDb();
       const sets: string[] = [];
       const params: any[] = [];
       for (const f of ['code', 'name', 'nameAr', 'seriesCount']) {
@@ -248,34 +449,55 @@ export const localDb = {
       sets.push('"updatedAt" = ?');
       params.push(new Date().toISOString());
       params.push(args.where.id);
-      db.prepare(`UPDATE "Category" SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      await (await db.prepare(`UPDATE "Category" SET ${sets.join(', ')} WHERE id = ?`)).run(...params);
       return localDb.category.findUnique({ where: { id: args.where.id } });
     },
-    deleteMany: () => ({ count: 0 }),
+    deleteMany: async () => ({ count: 0 }),
+    delete: async () => ({ count: 0 }),
+    count: async () => {
+      const db = await getDb();
+      const result = await (await db.prepare('SELECT COUNT(*) as count FROM "Category"')).get();
+      return result?.count || 0;
+    },
   },
 
   // Series
   serie: {
-    findFirst: (args: { where: { categoryId: string; number: number } }) => {
-      const db = getDb();
-      return db.prepare('SELECT * FROM "Serie" WHERE categoryId = ? AND number = ?')
-        .get(args.where.categoryId, args.where.number) as any || null;
+    findFirst: async (args: { where: { categoryId: string; number: number } }) => {
+      const db = await getDb();
+      const row = await (await db.prepare('SELECT * FROM "Serie" WHERE categoryId = ? AND number = ?'))
+        .get(args.where.categoryId, args.where.number);
+      return (row as any) || null;
     },
-    findMany: (args: { where: { categoryId: string } }) => {
-      const db = getDb();
-      return db.prepare('SELECT * FROM "Serie" WHERE categoryId = ? ORDER BY number')
-        .all(args.where.categoryId) as any[];
+    findMany: async (args: { where: { categoryId: string }; _includeQuestions?: boolean; _includeCount?: boolean; orderBy?: any }) => {
+      const db = await getDb();
+      const rows = await (await db.prepare('SELECT * FROM "Serie" WHERE categoryId = ? ORDER BY number'))
+        .all(args.where.categoryId);
+      if (args._includeQuestions) {
+        return Promise.all(rows.map(async (row: any) => ({
+          ...row,
+          questions: await localDb.question.findMany({ where: { serieId: row.id } })
+        })));
+      }
+      if (args._includeCount) {
+        return rows.map((row: any) => ({
+          ...row,
+          _count: { questions: row.questionsCount || 0 }
+        }));
+      }
+      return rows;
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO "Serie" (id, number, categoryId, questionsCount, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(id, args.data.number, args.data.categoryId, args.data.questionsCount || 0, now, now);
+      await (await db.prepare(
+        `INSERT INTO "Serie" (id, number, categoryId, questionsCount, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.number, args.data.categoryId, args.data.questionsCount || 0, now, now);
       return { ...args.data, id, createdAt: now, updatedAt: now };
     },
-    update: (args: { where: { id: string }; data: any }) => {
-      const db = getDb();
+    update: async (args: { where: { id: string }; data: any }) => {
+      const db = await getDb();
       const sets: string[] = [];
       const params: any[] = [];
       if (args.data.questionsCount !== undefined) {
@@ -285,16 +507,20 @@ export const localDb = {
       sets.push('"updatedAt" = ?');
       params.push(new Date().toISOString());
       params.push(args.where.id);
-      db.prepare(`UPDATE "Serie" SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-      return localDb.serie.findFirst({ where: { categoryId: '', number: 0 } }); // placeholder
+      await (await db.prepare(`UPDATE "Serie" SET ${sets.join(', ')} WHERE id = ?`)).run(...params);
+      return { id: args.where.id, ...args.data };
     },
-    deleteMany: (args: { where: { serieId?: string; categoryId?: string } }) => {
-      const db = getDb();
+    delete: async (args: { where: { id: string } }) => {
+      const db = await getDb();
+      await (await db.prepare('DELETE FROM "Serie" WHERE id = ?')).run(args.where.id);
+    },
+    deleteMany: async (args: { where: { serieId?: string; categoryId?: string } }) => {
+      const db = await getDb();
       if (args.where?.serieId) {
-        return db.prepare('DELETE FROM "Serie" WHERE id = ?').run(args.where.serieId);
+        await (await db.prepare('DELETE FROM "Serie" WHERE id = ?')).run(args.where.serieId);
       }
       if (args.where?.categoryId) {
-        return db.prepare('DELETE FROM "Serie" WHERE categoryId = ?').run(args.where.categoryId);
+        await (await db.prepare('DELETE FROM "Serie" WHERE categoryId = ?')).run(args.where.categoryId);
       }
       return { count: 0 };
     },
@@ -302,22 +528,30 @@ export const localDb = {
 
   // Questions
   question: {
-    findMany: (args: { where: { serieId: string }; orderBy?: { order: 'asc' | 'desc' } }) => {
-      const db = getDb();
+    findMany: async (args: { where: { serieId: string }; orderBy?: { order: 'asc' | 'desc' }; include?: any }) => {
+      const db = await getDb();
       const order = args.orderBy?.order === 'desc' ? 'DESC' : 'ASC';
-      return db.prepare(`SELECT * FROM "Question" WHERE serieId = ? ORDER BY "order" ${order}`)
-        .all(args.where.serieId) as any[];
+      const rows = await (await db.prepare(`SELECT * FROM "Question" WHERE serieId = ? ORDER BY "order" ${order}`))
+        .all(args.where.serieId);
+      if (args.include?.responses) {
+        return Promise.all(rows.map(async (row: any) => ({
+          ...row,
+          responses: await localDb.response.findMany({ where: { questionId: row.id } })
+        })));
+      }
+      return rows;
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO "Question" (id, serieId, "order", text, image, audio, video, duration, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, args.data.serieId, args.data.order, args.data.text || '', args.data.image || null, args.data.audio || '', args.data.video || null, args.data.duration || 30, now, now);
+      await (await db.prepare(
+        `INSERT INTO "Question" (id, serieId, "order", text, image, audio, video, duration, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.serieId, args.data.order, args.data.text || '', args.data.image || null, args.data.audio || '', args.data.video || null, args.data.duration || 30, now, now);
       return { ...args.data, id, createdAt: now, updatedAt: now };
     },
-    update: (args: { where: { id: string }; data: any }) => {
-      const db = getDb();
+    update: async (args: { where: { id: string }; data: any }) => {
+      const db = await getDb();
       const sets: string[] = [];
       const params: any[] = [];
       for (const f of ['text', 'image', 'audio', 'video', 'duration', 'order']) {
@@ -329,14 +563,14 @@ export const localDb = {
       sets.push('"updatedAt" = ?');
       params.push(new Date().toISOString());
       params.push(args.where.id);
-      db.prepare(`UPDATE "Question" SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-      return localDb.question.findMany({ where: { serieId: '' } })[0]; // placeholder
+      await (await db.prepare(`UPDATE "Question" SET ${sets.join(', ')} WHERE id = ?`)).run(...params);
+      return { id: args.where.id, ...args.data };
     },
-    deleteMany: (args: { where: { serieId?: string; question?: { serieId: string } } }) => {
-      const db = getDb();
+    deleteMany: async (args: { where: { serieId?: string; question?: { serieId: string } } }) => {
+      const db = await getDb();
       const serieId = args.where?.serieId || args.where?.question?.serieId;
       if (serieId) {
-        return db.prepare('DELETE FROM "Question" WHERE serieId = ?').run(serieId);
+        await (await db.prepare('DELETE FROM "Question" WHERE serieId = ?')).run(serieId);
       }
       return { count: 0 };
     },
@@ -344,32 +578,33 @@ export const localDb = {
 
   // Responses
   response: {
-    findMany: (args: { where: { questionId?: string; question?: { serieId: string } } }) => {
-      const db = getDb();
+    findMany: async (args: { where: { questionId?: string; question?: { serieId: string } }; orderBy?: any }) => {
+      const db = await getDb();
       if (args.where.questionId) {
-        return db.prepare('SELECT * FROM "Response" WHERE questionId = ? ORDER BY "order"')
-          .all(args.where.questionId) as any[];
+        const rows = await (await db.prepare('SELECT * FROM "Response" WHERE questionId = ? ORDER BY "order"'))
+          .all(args.where.questionId);
+        return rows.map((r: any) => ({ ...r, isCorrect: bool(r.isCorrect) }));
       }
       return [] as any[];
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO "Response" (id, questionId, "order", text, image, isCorrect, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, args.data.questionId, args.data.order, args.data.text || '', args.data.image || null, args.data.isCorrect ? 1 : 0, now, now);
+      await (await db.prepare(
+        `INSERT INTO "Response" (id, questionId, "order", text, image, isCorrect, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.questionId, args.data.order, args.data.text || '', args.data.image || null, args.data.isCorrect ? 1 : 0, now, now);
       return { ...args.data, id, isCorrect: args.data.isCorrect, createdAt: now, updatedAt: now };
     },
-    deleteMany: (args: { where: { questionId?: string; question?: { serieId: string } } }) => {
-      const db = getDb();
+    deleteMany: async (args: { where: { questionId?: string; question?: { serieId: string } } }) => {
+      const db = await getDb();
       if (args.where.questionId) {
-        return db.prepare('DELETE FROM "Response" WHERE questionId = ?').run(args.where.questionId);
+        await (await db.prepare('DELETE FROM "Response" WHERE questionId = ?')).run(args.where.questionId);
       }
       if (args.where?.question?.serieId) {
-        // Delete responses for all questions in a serie
-        const questions = db.prepare('SELECT id FROM "Question" WHERE serieId = ?').all(args.where.question.serieId) as any[];
-        for (const q of questions) {
-          db.prepare('DELETE FROM "Response" WHERE questionId = ?').run(q.id);
+        const questions = await (await db.prepare('SELECT id FROM "Question" WHERE serieId = ?')).all(args.where.question.serieId);
+        for (const q of questions as any[]) {
+          await (await db.prepare('DELETE FROM "Response" WHERE questionId = ?')).run(q.id);
         }
         return { count: questions.length };
       }
@@ -379,27 +614,30 @@ export const localDb = {
 
   // Test Results
   testResult: {
-    findMany: (args: { where: { userId?: string; categoryId?: string }; orderBy?: { createdAt: 'desc' } }) => {
-      const db = getDb();
+    findMany: async (args: { where: { userId?: string; categoryId?: string }; orderBy?: { createdAt: 'desc' } }) => {
+      const db = await getDb();
       let sql = 'SELECT * FROM "TestResult" WHERE 1=1';
       const params: any[] = [];
       if (args.where.userId) { sql += ' AND userId = ?'; params.push(args.where.userId); }
       if (args.where.categoryId) { sql += ' AND categoryId = ?'; params.push(args.where.categoryId); }
       if (args.orderBy?.createdAt === 'desc') sql += ' ORDER BY createdAt DESC';
-      return db.prepare(sql).all(...params) as any[];
+      else sql += ' ORDER BY createdAt DESC';
+      const rows = await (await db.prepare(sql)).all(...params);
+      return rows.map((r: any) => ({ ...r, passed: bool(r.passed) }));
     },
-    create: (args: { data: any }) => {
-      const db = getDb();
+    create: async (args: { data: any }) => {
+      const db = await getDb();
       const id = args.data.id || cuid();
       const now = new Date().toISOString();
-      db.prepare(`INSERT INTO "TestResult" (id, userId, categoryId, serieNumber, score, total, passed, answers, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, args.data.userId || null, args.data.categoryId, args.data.serieNumber, args.data.score, args.data.total, args.data.passed ? 1 : 0, args.data.answers || '', now);
+      await (await db.prepare(
+        `INSERT INTO "TestResult" (id, userId, categoryId, serieNumber, score, total, passed, answers, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.userId || null, args.data.categoryId, args.data.serieNumber, args.data.score, args.data.total, args.data.passed ? 1 : 0, JSON.stringify(args.data.answers || []), now);
       return { ...args.data, id, createdAt: now, passed: args.data.passed };
     },
-    count: () => {
-      const db = getDb();
-      const result = db.prepare('SELECT COUNT(*) as count FROM "TestResult"').get() as any;
-      return result.count;
+    count: async () => {
+      const db = await getDb();
+      const result = await (await db.prepare('SELECT COUNT(*) as count FROM "TestResult"')).get();
+      return result?.count || 0;
     },
   },
 };

@@ -36,4 +36,15 @@ console.log('Copying public to .next/standalone/public ...');
 copyRecursiveSync(publicSource, standalonePublic);
 console.log('Done.');
 
+// Copy sql.js WASM file to public (so it's available at runtime)
+const wasmSource = path.join(root, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
+const wasmDest = path.join(standalonePublic, 'sql-wasm.wasm');
+if (fs.existsSync(wasmSource)) {
+  console.log('Copying sql-wasm.wasm to standalone/public ...');
+  fs.copyFileSync(wasmSource, wasmDest);
+  console.log('Done.');
+} else {
+  console.log('Warning: sql-wasm.wasm not found in node_modules, skipping.');
+}
+
 console.log('Build post-process complete!');
