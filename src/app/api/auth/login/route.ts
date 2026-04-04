@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const user = await db.user.findUnique({
-      where: { cin },
+      where: { cin: cin.trim().toUpperCase() },
     })
 
     if (!user) {
