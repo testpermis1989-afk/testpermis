@@ -2851,40 +2851,11 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         setVerificationResult(data.verification);
         setShowVerificationModal(true);
 
-        // Auto-compression après verification réussie
+        // Skip compression - import directly
         if (data.verification.isValid && data.importId) {
-          setCompressBeforeImport({ done: false, loading: true, totalBefore: '', totalAfter: '', saved: '', details: [] });
-          fetch('/api/upload/rar/compress', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ importId: data.importId }),
-          }).then(async (cRes) => {
-            if (!cRes.ok) {
-              const cData = await cRes.json().catch(() => null);
-              console.error('Auto-compress error:', cData?.error);
-              setCompressBeforeImport(null);
-              return;
-            }
-            const cData = await cRes.json();
-            const fmt = (b: number) => {
-              if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-              return (b / 1024 / 1024).toFixed(2) + ' MB';
-            };
-            setCompressBeforeImport({
-              done: true,
-              loading: false,
-              totalBefore: fmt(cData.totalBefore),
-              totalAfter: fmt(cData.totalAfter),
-              saved: fmt(cData.totalSaved),
-              details: [
-                { type: '🖼️ Images', count: cData.result.images.compressed, repaired: cData.result.images.repaired || 0, before: fmt(cData.result.images.beforeBytes), after: fmt(cData.result.images.afterBytes) },
-                { type: '📋 Réponses', count: cData.result.responses.compressed, repaired: cData.result.responses.repaired || 0, before: fmt(cData.result.responses.beforeBytes), after: fmt(cData.result.responses.afterBytes) },
-                { type: '🔊 Audio', count: cData.result.audio.compressed, repaired: cData.result.audio.repaired || 0, before: fmt(cData.result.audio.beforeBytes), after: fmt(cData.result.audio.afterBytes) },
-                { type: '🎬 Vidéo', count: cData.result.video.compressed, repaired: cData.result.video.repaired || 0, before: fmt(cData.result.video.beforeBytes), after: fmt(cData.result.video.afterBytes) },
-              ],
-              repaired: (cData.result.images.repaired || 0) + (cData.result.audio.repaired || 0) + (cData.result.video.repaired || 0) + (cData.result.responses.repaired || 0),
-            });
-          }).catch(() => setCompressBeforeImport(null));
+          setCompressBeforeImport(null);
+          // Auto-import directly without compression
+          handleImport(data.importId);
         }
       } else if (data.success) {
         setMediaResult({ success: false, message: '❌ Aucune donnée de vérification reçue' });
@@ -3476,42 +3447,12 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                     (newVerification.images.missing.length > 0 || newVerification.audio.missing.length > 0 || newVerification.responses.missing.length > 0);
 
                                   if (newVerification.isValid || hasOnlyMissing) {
-                                    // 5) Lancer la compression automatiquement
-                                    msg += '\n🔄 Compression en cours...';
+                                    // 5) Import directly without compression
+                                    msg += '\n✅ Import en cours...';
                                     alert(msg);
-                                    if (btn) btn.textContent = '⏳ Compression...';
-                                    setCompressBeforeImport({ done: false, loading: true, totalBefore: '', totalAfter: '', saved: '', repaired: summary.totalRepaired, details: [] });
-
-                                    const cRes = await fetch('/api/upload/rar/compress', {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ importId: pendingImportId }),
-                                    });
-                                    if (cRes.ok) {
-                                      const cData = await cRes.json();
-                                      const fmt = (b: number) => {
-                                        if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-                                        return (b / 1024 / 1024).toFixed(2) + ' MB';
-                                      };
-                                      setCompressBeforeImport({
-                                        done: true,
-                                        loading: false,
-                                        totalBefore: fmt(cData.totalBefore),
-                                        totalAfter: fmt(cData.totalAfter),
-                                        saved: fmt(cData.totalSaved),
-                                        repaired: summary.totalRepaired,
-                                        details: [
-                                          { type: '🖼️ Images', count: cData.result.images.compressed, repaired: cData.result.images.repaired || 0, before: fmt(cData.result.images.beforeBytes), after: fmt(cData.result.images.afterBytes) },
-                                          { type: '📋 Réponses', count: cData.result.responses.compressed, repaired: cData.result.responses.repaired || 0, before: fmt(cData.result.responses.beforeBytes), after: fmt(cData.result.responses.afterBytes) },
-                                          { type: '🔊 Audio', count: cData.result.audio.compressed, repaired: cData.result.audio.repaired || 0, before: fmt(cData.result.audio.beforeBytes), after: fmt(cData.result.audio.afterBytes) },
-                                          { type: '🎬 Vidéo', count: cData.result.video.compressed, repaired: cData.result.video.repaired || 0, before: fmt(cData.result.video.beforeBytes), after: fmt(cData.result.video.afterBytes) },
-                                        ],
-                                      });
-                                    } else {
-                                      const cErr = await cRes.json().catch(() => null);
-                                      alert('❌ Erreur compression: ' + (cErr?.error || 'inconnue'));
-                                      setCompressBeforeImport(null);
-                                    }
+                                    if (btn) btn.textContent = '⏳ Import...';
+                                    setCompressBeforeImport(null);
+                                    handleImport(pendingImportId);
                                   } else {
                                     // Il reste des erreurs non-résolues
                                     msg += '\n\n⚠️ Des erreurs subsistent. Vérifiez le tableau ci-dessus.';
