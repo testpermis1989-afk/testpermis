@@ -1,32 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readdir, stat, mkdir, unlink, readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
+import { mkdir, unlink, readFile, writeFile, rm } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
 import AdmZip from 'adm-zip';
+import os from 'os';
 
 // POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP temporaire
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const importId = body.importId;
+    const zipBufferBase64 = body.zipBuffer;
 
-    if (!importId) {
-      return NextResponse.json({ error: 'Missing importId' }, { status: 400 });
+    if (!importId || !zipBufferBase64) {
+      return NextResponse.json({ error: 'Missing importId or zipBuffer' }, { status: 400 });
     }
 
-    const found = await findTempZip(importId);
-    if (!found) {
-      return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
-    }
-
-    const { tempPath } = found;
-    const tempExtractDir = path.join(process.cwd(), 'public', 'uploads', '_temp_repair', importId);
+    const zipBuffer = Buffer.from(zipBufferBase64, 'base64');
+    const tempExtractDir = path.join(os.tmpdir(), `repair_${importId}`);
     await mkdir(tempExtractDir, { recursive: true });
 
     try {
-      const zip = new AdmZip(tempPath);
+      const zip = new AdmZip(zipBuffer);
       const entries = zip.getEntries();
 
       // Auto-detect parent folder
@@ -100,7 +96,6 @@ export async function POST(request: NextRequest) {
             continue;
           }
 
-          // Try multiple repair strategies
           const repaired = await tryRepairAudio(fileData, baseName, tempExtractDir);
           if (repaired && repaired.length > 0 && isValidMp3(repaired)) {
             newZip.addFile(stripParent + dirName + baseName, repaired);
@@ -132,12 +127,11 @@ export async function POST(request: NextRequest) {
         newZip.addFile(entry.entryName, fileData);
       }
 
-      // Sauvegarder le ZIP réparé
-      newZip.writeZip(tempPath);
+      // Return the repaired ZIP as base64 (no filesystem storage needed)
+      const repairedBuffer = newZip.toBuffer();
 
       // Cleanup temp
       try {
-        const { rm } = await import('fs/promises');
         await rm(tempExtractDir, { recursive: true, force: true });
       } catch {}
 
@@ -147,11 +141,11 @@ export async function POST(request: NextRequest) {
         summary: {
           totalRepaired: report.repaired.length,
           totalRemoved: report.removed.length,
-        }
+        },
+        zipBuffer: repairedBuffer.toString('base64'),
       });
     } catch (error) {
       try {
-        const { rm } = await import('fs/promises');
         await rm(tempExtractDir, { recursive: true, force: true });
       } catch {}
       throw error;
@@ -234,33 +228,29 @@ async function tryRepairAudio(fileData: Buffer, baseName: string, tempDir: strin
           .run();
       });
 
-      const wavExists = existsSync(tmpWav);
-      if (wavExists) {
-        const wavStat = await stat(tmpWav);
-        if (wavStat.size > 1000) {
-          // Re-encode WAV to MP3
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg(tmpWav)
-              .audioCodec('libmp3lame')
-              .audioBitrate('64k')
-              .audioChannels(1)
-              .audioFrequency(22050)
-              .output(tmpOut)
-              .on('end', resolve)
-              .on('error', reject)
-              .run();
-          });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg(tmpWav)
+            .audioCodec('libmp3lame')
+            .audioBitrate('64k')
+            .audioChannels(1)
+            .audioFrequency(22050)
+            .output(tmpOut)
+            .on('end', resolve)
+            .on('error', reject)
+            .run();
+        });
 
-          await unlink(tmpWav).catch(() => {});
+        await unlink(tmpWav).catch(() => {});
 
-          const result = await readFile(tmpOut);
-          if (result.length > 100) {
-            await cleanupFiles(tmpIn, tmpOut, tmpWav);
-            return result;
-          }
+        const result = await readFile(tmpOut);
+        if (result.length > 100) {
+          await cleanupFiles(tmpIn, tmpOut, tmpWav);
+          return result;
         }
+      } catch {
+        await unlink(tmpWav).catch(() => {});
       }
-      await unlink(tmpWav).catch(() => {});
     } catch {
       await unlink(tmpWav).catch(() => {});
     }
@@ -339,32 +329,4 @@ function isValidMp4(data: Buffer): boolean {
   if (data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76) return true;
   if (data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74) return true;
   return false;
-}
-
-async function findTempZip(importId: string): Promise<{ tempPath: string } | null> {
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-  if (!existsSync(uploadsDir)) return null;
-
-  const categories = await readdir(uploadsDir);
-  for (const cat of categories) {
-    const catDir = path.join(uploadsDir, cat);
-    if (!existsSync(catDir)) continue;
-    const statCat = await stat(catDir);
-    if (!statCat.isDirectory()) continue;
-
-    const series = await readdir(catDir);
-    for (const ser of series) {
-      const serDir = path.join(catDir, ser);
-      if (!existsSync(serDir)) continue;
-      const statSer = await stat(serDir);
-      if (!statSer.isDirectory()) continue;
-
-      const files = await readdir(serDir);
-      const tempFile = files.find(f => f === `temp_${importId}.zip`);
-      if (tempFile) {
-        return { tempPath: path.join(serDir, tempFile) };
-      }
-    }
-  }
-  return null;
 }

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import path from 'path'
+import { uploadFile, getPublicUrl } from '@/lib/supabase'
 
 const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp']
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'photos')
+const MIME_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,20 +38,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await mkdir(UPLOAD_DIR, { recursive: true })
-
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
     const fileName = `${cin}.${ext}`
-    const filePath = path.join(UPLOAD_DIR, fileName)
+    const storagePath = `photos/${fileName}`
+    const contentType = MIME_TYPES[ext] || 'image/jpeg'
 
-    await writeFile(filePath, buffer)
+    await uploadFile(storagePath, buffer, contentType)
 
-    const photoUrl = `/uploads/photos/${fileName}`
+    const photoUrl = getPublicUrl(storagePath)
 
     return NextResponse.json({ photo: photoUrl })
   } catch (error) {
+    console.error('Photo upload error:', error)
     return NextResponse.json(
       { error: 'Erreur lors du téléchargement' },
       { status: 500 }

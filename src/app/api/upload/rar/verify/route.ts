@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync, readdirSync } from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
 
@@ -13,12 +12,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing importId' }, { status: 400 });
     }
 
-    const found = await findTempZip(importId);
-    if (!found) {
-      return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
+    // The uploadJobs map is shared via the parent module (upload/rar/route.ts)
+    // Since we can't directly import the in-memory map from another route module,
+    // we need to find the job from the in-memory store.
+    // For verification only (after repair), the repaired ZIP buffer should be passed
+    // or we need to find it in the shared state.
+    
+    // This route now expects a base64-encoded ZIP buffer in the request body
+    const zipBufferBase64 = body.zipBuffer;
+    if (!zipBufferBase64) {
+      return NextResponse.json({ error: 'Missing zipBuffer (base64)' }, { status: 400 });
     }
 
-    const verification = await verifyZipFile(found.tempPath);
+    const zipBuffer = Buffer.from(zipBufferBase64, 'base64');
+    const verification = verifyZipBuffer(zipBuffer);
     return NextResponse.json({ success: true, verification });
   } catch (error) {
     console.error('Re-verify error:', error);
@@ -26,7 +33,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function verifyZipFile(zipPath: string) {
+function verifyZipBuffer(zipBuffer: Buffer) {
   const result = {
     isValid: true,
     errors: [] as string[],
@@ -39,7 +46,7 @@ async function verifyZipFile(zipPath: string) {
     questionsDetails: [] as { num: number; hasImage: boolean; hasAudio: boolean; hasVideo: boolean; hasResponse: boolean; answers: string; imageValid: boolean; audioValid: boolean; videoValid: boolean; responseValid: boolean }[]
   };
 
-  const zip = new AdmZip(zipPath);
+  const zip = new AdmZip(zipBuffer);
   const entries = zip.getEntries();
 
   const topLevelDirs = new Set<string>();
@@ -249,26 +256,4 @@ function isVideoFile(entryName: string, entryNameOriginal: string): boolean {
   if (entryName.includes('video/')) return true;
   const base = path.basename(entryNameOriginal).toLowerCase();
   return /^q\d+/i.test(base) || /^\d+\.mp4$/i.test(base);
-}
-
-async function findTempZip(importId: string): Promise<{ tempPath: string } | null> {
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-  if (!existsSync(uploadsDir)) return null;
-
-  const categories = readdirSync(uploadsDir);
-  for (const cat of categories) {
-    const catDir = path.join(uploadsDir, cat);
-    if (!existsSync(catDir)) continue;
-    const series = readdirSync(catDir);
-    for (const ser of series) {
-      const serDir = path.join(catDir, ser);
-      if (!existsSync(serDir)) continue;
-      const files = readdirSync(serDir);
-      const tempFile = files.find(f => f === `temp_${importId}.zip`);
-      if (tempFile) {
-        return { tempPath: path.join(serDir, tempFile) };
-      }
-    }
-  }
-  return null;
 }

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { existsSync, readdirSync } from 'fs';
-import path from 'path';
+import { supabase, getPublicUrl, listFiles } from '@/lib/supabase';
 
-// POST /api/questions/reprocess - Rescan files and fix missing paths in DB
+// POST /api/questions/reprocess - Rescan files in Supabase Storage and fix missing paths in DB
 export async function POST(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -52,28 +51,45 @@ async function reprocessSerie(categoryCode: string, serieNumber: number): Promis
     const num = q.order;
     const updateData: { image?: string; audio?: string; text?: string; video?: string } = {};
 
-    // Fix image
-    const imgPath = findFile(categoryCode, serieNumber, 'images', num, ['q' + num, String(num)]);
-    if (imgPath && (!q.image || !fileExists(q.image))) {
-      updateData.image = imgPath;
+    // Fix image - check Supabase Storage
+    const imgStoragePath = `series/${categoryCode}/${serieNumber}/images`;
+    const imgFile = await findFileInStorage(imgStoragePath, num, ['q' + num, String(num)]);
+    if (imgFile) {
+      const publicUrl = getPublicUrl(imgFile);
+      if (publicUrl !== q.image) updateData.image = publicUrl;
+    } else if (q.image) {
+      // Image path exists in DB but file not found in storage - clear it
+      updateData.image = '';
     }
 
     // Fix audio
-    const audioPath = findFile(categoryCode, serieNumber, 'audio', num, ['q' + num, String(num)], ['mp3']);
-    if (audioPath && (!q.audio || !fileExists(q.audio))) {
-      updateData.audio = audioPath;
+    const audioStoragePath = `series/${categoryCode}/${serieNumber}/audio`;
+    const audioFile = await findFileInStorage(audioStoragePath, num, ['q' + num, String(num)], ['mp3']);
+    if (audioFile) {
+      const publicUrl = getPublicUrl(audioFile);
+      if (publicUrl !== q.audio) updateData.audio = publicUrl;
+    } else if (q.audio) {
+      updateData.audio = '';
     }
 
-    // Fix response image
-    const respPath = findFile(categoryCode, serieNumber, 'responses', num, ['r' + num, 'R' + num, String(num)]);
-    if (respPath && (!q.text || !fileExists(q.text))) {
-      updateData.text = respPath;
+    // Fix response image (text field)
+    const respStoragePath = `series/${categoryCode}/${serieNumber}/responses`;
+    const respFile = await findFileInStorage(respStoragePath, num, ['r' + num, 'R' + num, String(num)]);
+    if (respFile) {
+      const publicUrl = getPublicUrl(respFile);
+      if (publicUrl !== q.text) updateData.text = publicUrl;
+    } else if (q.text) {
+      updateData.text = '';
     }
 
     // Fix video
-    const videoPath = findFile(categoryCode, serieNumber, 'video', num, ['q' + num, String(num)], ['mp4']);
-    if (videoPath && (!q.video || !fileExists(q.video))) {
-      updateData.video = videoPath;
+    const videoStoragePath = `series/${categoryCode}/${serieNumber}/video`;
+    const videoFile = await findFileInStorage(videoStoragePath, num, ['q' + num, String(num)], ['mp4']);
+    if (videoFile) {
+      const publicUrl = getPublicUrl(videoFile);
+      if (publicUrl !== q.video) updateData.video = publicUrl;
+    } else if (q.video) {
+      updateData.video = null;
     }
 
     if (Object.keys(updateData).length > 0) {
@@ -85,29 +101,25 @@ async function reprocessSerie(categoryCode: string, serieNumber: number): Promis
   return fixed;
 }
 
-function findFile(categoryCode: string, serieNumber: number, subDir: string, num: number, prefixes: string[], exts?: string[]): string | null {
-  const dir = path.join(process.cwd(), 'public', 'uploads', categoryCode, String(serieNumber), subDir);
-  if (!existsSync(dir)) return null;
-
-  const defaultExts = exts || ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+async function findFileInStorage(folder: string, num: number, prefixes: string[], exts?: string[]): Promise<string | null> {
   try {
-    const files = readdirSync(dir);
+    const { data, error } = await supabase.storage.from('uploads').list(folder);
+    if (error || !data || data.length === 0) return null;
+
+    const defaultExts = exts || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+
     for (const prefix of prefixes) {
+      const baseName = prefix ? `${prefix}${num}` : `${num}`;
       for (const ext of defaultExts) {
-        const fileName = `${prefix}.${ext}`;
-        if (files.some(f => f.toLowerCase() === fileName.toLowerCase())) {
-          const actualFile = files.find(f => f.toLowerCase() === fileName.toLowerCase());
-          return `/uploads/${categoryCode}/${serieNumber}/${subDir}/${actualFile}`;
+        const target = `${baseName}.${ext}`;
+        const match = data.find(f => f.name.toLowerCase() === target.toLowerCase());
+        if (match) {
+          return `${folder}/${match.name}`;
         }
       }
     }
-  } catch {
-    return null;
+  } catch (err) {
+    console.error('Error listing storage files:', err);
   }
   return null;
-}
-
-function fileExists(urlPath: string): boolean {
-  const filePath = path.join(process.cwd(), 'public', urlPath);
-  return existsSync(filePath);
 }

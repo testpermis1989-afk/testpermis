@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readdir, stat } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '@/lib/db';
+import { supabase, downloadFile, listFiles, toStoragePath } from '@/lib/supabase';
 
-// Mapping catégorie lettre → numéro (A→1, B→2, C→3, D→4, E→5)
-const categoryToNumber: Record<string, string> = {
-  A: '1',
-  B: '2',
-  C: '3',
-  D: '4',
-  E: '5',
-};
-
-// POST /api/admin/download - Download a series as ZIP
+// POST /api/admin/download - Download a series as ZIP (from Supabase Storage)
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -24,38 +13,31 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing category or serie' }, { status: 400 });
   }
 
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
-  if (!existsSync(uploadDir)) {
-    return NextResponse.json({ error: 'Série non trouvée' }, { status: 404 });
-  }
+  const storagePrefix = `series/${categoryCode}/${serieNumber}`;
 
   try {
     const zip = new AdmZip();
     const subDirs = ['images', 'audio', 'video', 'responses'];
     let totalFiles = 0;
 
+    // Download files from Supabase Storage and add to ZIP
     for (const subDir of subDirs) {
-      const dir = path.join(uploadDir, subDir);
-      if (!existsSync(dir)) continue;
-      const files = await readdir(dir);
-      for (const file of files) {
-        const filePath = path.join(dir, file);
-        try {
-          if ((await stat(filePath)).isFile()) {
-            zip.addLocalFile(filePath, subDir);
-            totalFiles++;
-          }
-        } catch {}
-      }
-    }
-
-    // Also add existing TXT files (skip reponses.txt if already exists, we'll regenerate it)
-    const txtFiles = (await readdir(uploadDir)).filter(f => f.endsWith('.txt') && f !== 'reponses.txt');
-    for (const txt of txtFiles) {
+      const folder = `${storagePrefix}/${subDir}`;
       try {
-        zip.addLocalFile(path.join(uploadDir, txt));
-        totalFiles++;
-      } catch {}
+        const files = await listFiles(folder);
+        for (const file of files) {
+          try {
+            const filePath = `${folder}/${file}`;
+            const fileBuffer = await downloadFile(filePath);
+            zip.addFile(`${subDir}/${file}`, fileBuffer);
+            totalFiles++;
+          } catch (err) {
+            console.error(`Failed to download ${folder}/${file}:`, err);
+          }
+        }
+      } catch (err) {
+        // Folder doesn't exist - skip
+      }
     }
 
     // Generate reponses.txt from database
@@ -77,7 +59,6 @@ export async function POST(request: NextRequest) {
 
       if (category && category.series.length > 0) {
         const serie = category.series[0];
-        const catNum = categoryToNumber[categoryCode] || categoryCode;
         const lines: string[] = [];
 
         for (const q of serie.questions) {
@@ -95,14 +76,6 @@ export async function POST(request: NextRequest) {
       }
     } catch (dbError) {
       console.error('Error generating reponses.txt from DB:', dbError);
-      // Fallback: try to find existing reponses.txt in uploadDir
-      const existingReponses = path.join(uploadDir, 'reponses.txt');
-      if (existsSync(existingReponses)) {
-        try {
-          zip.addLocalFile(existingReponses);
-          totalFiles++;
-        } catch {}
-      }
     }
 
     if (totalFiles === 0) {

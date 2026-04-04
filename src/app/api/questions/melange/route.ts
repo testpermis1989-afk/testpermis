@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { toSupabaseUrl } from '@/lib/supabase';
 
 // GET /api/questions/melange?category=A - Get mixed questions
 // B: 40 from B | A/C/D/E: 36 from B + 10 from category
@@ -38,15 +39,15 @@ export async function GET(request: NextRequest) {
           s.questions.map(q => ({
             id: q.id,
             order: q.order,
-            image: q.image,
-            audio: q.audio,
-            video: q.video,
+            image: toSupabaseUrl(q.image),
+            audio: toSupabaseUrl(q.audio),
+            video: toSupabaseUrl(q.video),
             duration: q.duration,
             responses: q.responses.map(r => ({
               id: r.id,
               order: r.order,
               text: r.text,
-              image: r.image,
+              image: toSupabaseUrl(r.image),
               isCorrect: r.isCorrect,
             })),
           }))
@@ -97,15 +98,15 @@ export async function GET(request: NextRequest) {
             s.questions.map(q => ({
               id: q.id,
               order: q.order,
-              image: q.image,
-              audio: q.audio,
-              video: q.video,
+              image: toSupabaseUrl(q.image),
+              audio: toSupabaseUrl(q.audio),
+              video: toSupabaseUrl(q.video),
               duration: q.duration,
               responses: q.responses.map(r => ({
                 id: r.id,
                 order: r.order,
                 text: r.text,
-                image: r.image,
+                image: toSupabaseUrl(r.image),
                 isCorrect: r.isCorrect,
               })),
             }))
@@ -117,15 +118,15 @@ export async function GET(request: NextRequest) {
             s.questions.map(q => ({
               id: q.id,
               order: q.order,
-              image: q.image,
-              audio: q.audio,
-              video: q.video,
+              image: toSupabaseUrl(q.image),
+              audio: toSupabaseUrl(q.audio),
+              video: toSupabaseUrl(q.video),
               duration: q.duration,
               responses: q.responses.map(r => ({
                 id: r.id,
                 order: r.order,
                 text: r.text,
-                image: r.image,
+                image: toSupabaseUrl(r.image),
                 isCorrect: r.isCorrect,
               })),
             }))

@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { existsSync } from 'fs';
-import { rm } from 'fs/promises';
-import path from 'path';
+import { deleteFolder } from '@/lib/supabase';
 
-// DELETE /api/questions/delete - Delete a serie (DB + fichiers)
+// DELETE /api/questions/delete - Delete a serie (DB + Supabase Storage files)
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -47,13 +45,14 @@ export async function DELETE(request: NextRequest) {
       where: { id: serie.id },
     });
 
-    // Supprimer les fichiers physiques du disque
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
-    if (existsSync(uploadDir)) {
+    // Delete files from Supabase Storage
+    const storagePrefix = `series/${categoryCode}/${serieNumber}`;
+    const subDirs = ['images', 'audio', 'video', 'responses'];
+    for (const subDir of subDirs) {
       try {
-        await rm(uploadDir, { recursive: true, force: true });
-      } catch (fsError) {
-        console.error('Erreur suppression fichiers:', fsError);
+        await deleteFolder(`${storagePrefix}/${subDir}`);
+      } catch (err) {
+        console.error(`Failed to delete ${storagePrefix}/${subDir}:`, err);
       }
     }
 

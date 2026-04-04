@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { toSupabaseUrl } from '@/lib/supabase';
 
 // GET /api/questions - Get questions for a serie
 export async function GET(request: NextRequest) {
@@ -39,15 +40,15 @@ export async function GET(request: NextRequest) {
     const questions = serie.questions.map((q) => ({
       id: q.id,
       order: q.order,
-      image: q.image,
-      audio: q.audio,
-      video: q.video,
+      image: toSupabaseUrl(q.image),
+      audio: toSupabaseUrl(q.audio),
+      video: toSupabaseUrl(q.video),
       duration: q.duration,
       responses: q.responses.map((r) => ({
         id: r.id,
         order: r.order,
         text: r.text,
-        image: r.image,
+        image: toSupabaseUrl(r.image),
         isCorrect: r.isCorrect,
       })),
     }));

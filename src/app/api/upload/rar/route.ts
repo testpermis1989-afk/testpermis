@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir, readdir, unlink, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '@/lib/db';
 import { randomUUID } from 'crypto';
+import { uploadFile, getPublicUrl } from '@/lib/supabase';
+import os from 'os';
+import { writeFile, mkdir, unlink, rm } from 'fs/promises';
 
-// Store upload jobs in memory
-const uploadJobs = new Map<string, { tempPath: string; categoryCode: string; serieNumber: string; fileName: string; fileSize: string; verified: boolean }>();
+// Store upload jobs in memory - buffer instead of temp file path
+const uploadJobs = new Map<string, { zipBuffer: Buffer; categoryCode: string; serieNumber: string; fileName: string; fileSize: string; verified: boolean }>();
+
+const MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+};
 
 // POST /api/upload/rar - Upload, verify and extract ZIP file
 export async function POST(request: NextRequest) {
@@ -40,20 +53,16 @@ export async function POST(request: NextRequest) {
     // MODE 2: Import from already uploaded file (no re-upload!)
     if (importId && uploadJobs.has(importId)) {
       const job = uploadJobs.get(importId)!;
-      if (!existsSync(job.tempPath)) {
-        uploadJobs.delete(importId);
-        return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
-      }
 
       try {
-        const verification = await verifyZipFile(job.tempPath);
+        // Verify from buffer
+        const verification = verifyZipBuffer(job.zipBuffer);
         if (!verification.isValid) {
-          if (existsSync(job.tempPath)) await unlink(job.tempPath);
           uploadJobs.delete(importId);
           return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
         }
 
-        const result = await extractAndImport(job.tempPath, job.categoryCode, parseInt(job.serieNumber));
+        const result = await extractAndImport(job.zipBuffer, job.categoryCode, parseInt(job.serieNumber));
         uploadJobs.delete(importId);
         return NextResponse.json({ success: true, ...result });
       } catch (error) {
@@ -71,22 +80,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Seuls les fichiers ZIP sont acceptés' }, { status: 400 });
     }
 
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
     const jobId = randomUUID();
-    const tempPath = path.join(uploadDir, `temp_${jobId}.zip`);
 
-    await mkdir(uploadDir, { recursive: true });
-
-    // Save uploaded file
+    // Save ZIP to buffer in memory
     const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(tempPath, buffer);
 
-    // Verify ZIP
+    // Verify ZIP from buffer
     let verification;
     try {
-      verification = await verifyZipFile(tempPath);
+      verification = verifyZipBuffer(buffer);
     } catch (error) {
-      if (existsSync(tempPath)) await unlink(tempPath);
       return NextResponse.json({
         success: false,
         error: 'Erreur lors de la vérification du fichier ZIP',
@@ -103,9 +106,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Keep file on server for later import (no re-upload needed!)
+    // Keep buffer in memory for later import (no re-upload needed!)
     uploadJobs.set(jobId, {
-      tempPath,
+      zipBuffer: buffer,
       categoryCode,
       serieNumber,
       fileName: file.name,
@@ -115,11 +118,7 @@ export async function POST(request: NextRequest) {
 
     // Auto-cleanup after 10 minutes
     setTimeout(() => {
-      if (uploadJobs.has(jobId)) {
-        const job = uploadJobs.get(jobId)!;
-        if (existsSync(job.tempPath)) unlink(job.tempPath).catch(() => {});
-        uploadJobs.delete(jobId);
-      }
+      uploadJobs.delete(jobId);
     }, 10 * 60 * 1000);
 
     if (verifyOnly) {
@@ -135,12 +134,11 @@ export async function POST(request: NextRequest) {
 
     // Direct import (no verification step)
     if (!verification.isValid) {
-      if (existsSync(tempPath)) await unlink(tempPath);
       uploadJobs.delete(jobId);
       return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
     }
 
-    const result = await extractAndImport(tempPath, categoryCode, parseInt(serieNumber));
+    const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
     uploadJobs.delete(jobId);
     return NextResponse.json({ success: true, ...result });
 
@@ -150,22 +148,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Extract ZIP and import to database
-async function extractAndImport(tempPath: string, categoryCode: string, serieNumber: number) {
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString());
-  const imagesDir = path.join(uploadDir, 'images');
-  const audioDir = path.join(uploadDir, 'audio');
-  const videoDir = path.join(uploadDir, 'video');
-
-  await mkdir(imagesDir, { recursive: true });
-  await mkdir(audioDir, { recursive: true });
-  await mkdir(videoDir, { recursive: true });
-
-  let extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false };
+// Extract ZIP buffer and import to Supabase Storage + database
+async function extractAndImport(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
+  const storagePrefix = `series/${categoryCode}/${serieNumber}`;
+  const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false };
   let questionsImported = 0;
 
   try {
-    const zip = new AdmZip(tempPath);
+    const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
     // Auto-detect parent folder
@@ -176,6 +166,9 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
     }
     let stripParent = '';
     if (topLevelDirs.size === 1) stripParent = [...topLevelDirs][0] + '/';
+
+    // Build a map of question files found during extraction
+    const questionFiles = new Map<number, { image?: string; audio?: string; video?: string }>();
 
     for (const entry of entries) {
       if (entry.isDirectory) continue;
@@ -188,7 +181,7 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
       }
       const baseNameOriginal = path.basename(entryNameFull);
 
-      // TXT file
+      // TXT file - read content for question processing
       if (entryName.endsWith('.txt') && (
         entryName.includes('reponse') || entryName.includes('response') ||
         entryName.includes('answer') || entryName.includes('question') ||
@@ -199,40 +192,96 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
         baseNameOriginal.toLowerCase().startsWith('answer') ||
         baseNameOriginal.toLowerCase() === 'data.txt'
       )) {
-        const txtPath = path.join(uploadDir, baseNameOriginal);
-        zip.extractEntryTo(entry, uploadDir, false, true);
-        extractedFiles.txtFile = txtPath;
+        const txtData = entry.getData();
+        extractedFiles.txtFile = txtData.toString('utf-8');
+        continue;
+      }
+
+      // Extract file data and determine its type
+      let fileData: Buffer;
+      try {
+        fileData = entry.getData();
+      } catch {
         continue;
       }
 
       if (isQuestionImage(entryName, entryNameFull)) {
-        zip.extractEntryTo(entry, imagesDir, false, true);
-        extractedFiles.images++;
+        const qNum = extractQuestionNumber(baseNameOriginal);
+        const storagePath = `${storagePrefix}/images/${baseNameOriginal}`;
+        const ext = path.extname(baseNameOriginal).toLowerCase();
+        const mime = MIME_TYPES[ext] || 'image/png';
+        try {
+          await uploadFile(storagePath, fileData, mime);
+          extractedFiles.images++;
+          if (qNum) {
+            const existing = questionFiles.get(qNum) || {};
+            questionFiles.set(qNum, { ...existing, image: storagePath });
+          }
+        } catch (err) {
+          console.error(`Failed to upload image ${baseNameOriginal}:`, err);
+        }
         continue;
       }
+
+      if (isResponseImage(entryName, entryNameFull)) {
+        const storagePath = `${storagePrefix}/responses/${baseNameOriginal}`;
+        const ext = path.extname(baseNameOriginal).toLowerCase();
+        const mime = MIME_TYPES[ext] || 'image/png';
+        try {
+          await uploadFile(storagePath, fileData, mime);
+          extractedFiles.responses++;
+        } catch (err) {
+          console.error(`Failed to upload response image ${baseNameOriginal}:`, err);
+        }
+        continue;
+      }
+
       if (isAudioFile(entryName, entryNameFull)) {
-        zip.extractEntryTo(entry, audioDir, false, true);
-        extractedFiles.audio++;
+        const qNum = extractQuestionNumber(baseNameOriginal);
+        const storagePath = `${storagePrefix}/audio/${baseNameOriginal}`;
+        const mime = MIME_TYPES['.mp3'] || 'audio/mpeg';
+        try {
+          await uploadFile(storagePath, fileData, mime);
+          extractedFiles.audio++;
+          if (qNum) {
+            const existing = questionFiles.get(qNum) || {};
+            questionFiles.set(qNum, { ...existing, audio: storagePath });
+          }
+        } catch (err) {
+          console.error(`Failed to upload audio ${baseNameOriginal}:`, err);
+        }
         continue;
       }
+
       if (isVideoFile(entryName, entryNameFull)) {
-        zip.extractEntryTo(entry, videoDir, false, true);
-        extractedFiles.video++;
+        const qNum = extractQuestionNumber(baseNameOriginal);
+        const storagePath = `${storagePrefix}/video/${baseNameOriginal}`;
+        const mime = MIME_TYPES['.mp4'] || 'video/mp4';
+        try {
+          await uploadFile(storagePath, fileData, mime);
+          extractedFiles.video++;
+          if (qNum) {
+            const existing = questionFiles.get(qNum) || {};
+            questionFiles.set(qNum, { ...existing, video: storagePath });
+          }
+        } catch (err) {
+          console.error(`Failed to upload video ${baseNameOriginal}:`, err);
+        }
         continue;
       }
     }
 
+    // Process TXT file and create database entries
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
-      questionsImported = await processTxtFile(extractedFiles.txtFile, categoryCode, serieNumber);
-      await unlink(extractedFiles.txtFile);
+      questionsImported = await processTxtContent(extractedFiles.txtFile, categoryCode, serieNumber, storagePrefix);
     }
-  } finally {
-    if (existsSync(tempPath)) await unlink(tempPath);
+  } catch (error) {
+    console.error('Extraction error:', error);
+    throw error;
   }
 
   return {
     message: 'Fichier traité avec succès!',
-    fileName: path.basename(tempPath),
     extracted: {
       images: extractedFiles.images,
       audio: extractedFiles.audio,
@@ -244,8 +293,91 @@ async function extractAndImport(tempPath: string, categoryCode: string, serieNum
   };
 }
 
-// Verify ZIP file
-async function verifyZipFile(zipPath: string) {
+// Process TXT content and create questions in database
+async function processTxtContent(txtContent: string, categoryCode: string, serieNumber: number, storagePrefix: string): Promise<number> {
+  const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+
+  let category = await db.category.findUnique({ where: { code: categoryCode } });
+  if (!category) {
+    category = await db.category.create({ data: { code: categoryCode, name: getCategoryName(categoryCode), nameAr: getCategoryNameAr(categoryCode) } });
+  }
+
+  let serie = await db.serie.findFirst({ where: { categoryId: category.id, number: serieNumber } });
+  if (!serie) {
+    serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
+  }
+
+  await db.response.deleteMany({ where: { question: { serieId: serie.id } } });
+  await db.question.deleteMany({ where: { serieId: serie.id } });
+
+  let imported = 0;
+  for (const line of lines) {
+    const parts = line.split(/[\t\s,;]+/).filter(p => p);
+    if (parts.length < 2) continue;
+    const questionNumber = parseInt(parts[0]);
+    const correctAnswers = parts[1];
+    if (isNaN(questionNumber)) continue;
+
+    // Build storage paths using the Supabase storage prefix
+    const imageStoragePath = `${storagePrefix}/images`;
+    const audioStoragePath = `${storagePrefix}/audio`;
+    const videoStoragePath = `${storagePrefix}/video`;
+
+    // Try to find matching files - search both q{n}.ext and {n}.ext patterns
+    const imageFile = await findFileInStorage(imageStoragePath, questionNumber, ['q', '']);
+    const audioFile = await findFileInStorage(audioStoragePath, questionNumber, ['q', ''], ['mp3']);
+    const videoFile = await findFileInStorage(videoStoragePath, questionNumber, ['q', ''], ['mp4']);
+
+    const question = await db.question.create({
+      data: {
+        serieId: serie.id,
+        order: questionNumber,
+        image: imageFile ? getPublicUrl(imageFile) : '',
+        audio: audioFile ? getPublicUrl(audioFile) : '',
+        video: videoFile ? getPublicUrl(videoFile) : null,
+        text: '',
+      },
+    });
+
+    for (let j = 1; j <= 4; j++) {
+      await db.response.create({
+        data: { questionId: question.id, order: j, text: `Réponse ${j}`, isCorrect: correctAnswers.includes(String(j)) },
+      });
+    }
+    imported++;
+  }
+
+  await db.serie.update({ where: { id: serie.id }, data: { questionsCount: imported } });
+  return imported;
+}
+
+// Find a file in Supabase Storage folder
+async function findFileInStorage(folder: string, num: number, prefixes: string[], exts?: string[]): Promise<string | null> {
+  try {
+    const { data, error } = await import('@/lib/supabase').then(m => m.supabase.storage.from('uploads').list(folder));
+    if (error || !data || data.length === 0) return null;
+
+    const defaultExts = exts || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+    const numStr = String(num);
+
+    for (const prefix of prefixes) {
+      const baseName = prefix ? `${prefix}${numStr}` : numStr;
+      for (const ext of defaultExts) {
+        const target = `${baseName}.${ext}`;
+        const match = data.find(f => f.name.toLowerCase() === target.toLowerCase());
+        if (match) {
+          return `${folder}/${match.name}`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error listing storage files:', err);
+  }
+  return null;
+}
+
+// Verify ZIP buffer (no filesystem needed)
+function verifyZipBuffer(zipBuffer: Buffer) {
   const result = {
     isValid: true,
     errors: [] as string[],
@@ -262,7 +394,7 @@ async function verifyZipFile(zipPath: string) {
   let entries: AdmZip.IZipEntry[];
 
   try {
-    zip = new AdmZip(zipPath);
+    zip = new AdmZip(zipBuffer);
     entries = zip.getEntries();
   } catch (zipError) {
     result.isValid = false;
@@ -497,110 +629,6 @@ function isVideoFile(entryName: string, entryNameOriginal: string): boolean {
   return false;
 }
 
-async function processTxtFile(txtPath: string, categoryCode: string, serieNumber: number): Promise<number> {
-  const { readFile } = await import('fs/promises');
-  const content = await readFile(txtPath, 'utf-8');
-  const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
-  let category = await db.category.findUnique({ where: { code: categoryCode } });
-  if (!category) {
-    category = await db.category.create({ data: { code: categoryCode, name: getCategoryName(categoryCode), nameAr: getCategoryNameAr(categoryCode) } });
-  }
-
-  let serie = await db.serie.findFirst({ where: { categoryId: category.id, number: serieNumber } });
-  if (!serie) {
-    serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
-  }
-
-  await db.response.deleteMany({ where: { question: { serieId: serie.id } } });
-  await db.question.deleteMany({ where: { serieId: serie.id } });
-
-  let imported = 0;
-  for (const line of lines) {
-    const parts = line.split(/[\t\s,;]+/).filter(p => p);
-    if (parts.length < 2) continue;
-    const questionNumber = parseInt(parts[0]);
-    const correctAnswers = parts[1];
-    if (isNaN(questionNumber)) continue;
-
-    const imagesDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'images');
-    const audioDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'audio');
-    const videoDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber.toString(), 'video');
-
-    const imageFile = await findRealFile(imagesDir, questionNumber, ['q', '']);
-    const audioFile = await findRealFile(audioDir, questionNumber, ['q', '']);
-    const videoFile = await findRealFile(videoDir, questionNumber, ['q', '']);
-
-    const question = await db.question.create({
-      data: {
-        serieId: serie.id,
-        order: questionNumber,
-        image: imageFile ? `/uploads/${categoryCode}/${serieNumber}/images/${imageFile}` : '',
-        audio: audioFile ? `/uploads/${categoryCode}/${serieNumber}/audio/${audioFile}` : '',
-        video: videoFile ? `/uploads/${categoryCode}/${serieNumber}/video/${videoFile}` : null,
-        text: '',
-      },
-    });
-
-    for (let j = 1; j <= 4; j++) {
-      await db.response.create({
-        data: { questionId: question.id, order: j, text: `Réponse ${j}`, isCorrect: correctAnswers.includes(String(j)) },
-      });
-    }
-    imported++;
-  }
-
-  await db.serie.update({ where: { id: serie.id }, data: { questionsCount: imported } });
-  return imported;
-}
-
-// Trouver le vrai nom de fichier sur disque (ex: "6.png", "q6.webp", "r6.png")
-async function findRealFile(dir: string, num: number, prefixes: string[]): Promise<string | null> {
-  if (!existsSync(dir)) return null;
-  try {
-    const files = await readdir(dir);
-    const numStr = String(num);
-    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'mp3', 'mp4'];
-
-    for (const prefix of prefixes) {
-      const baseName = prefix ? `${prefix}${numStr}` : numStr;
-      for (const file of files) {
-        const lowerFile = file.toLowerCase();
-        // Match: baseName.ext (ex: "q6.png" ou "6.png" ou "q6.webp")
-        for (const ext of imageExts) {
-          if (lowerFile === `${baseName.toLowerCase()}.${ext}`) {
-            return file; // Retourner le nom réel du fichier
-          }
-        }
-      }
-    }
-  } catch {}
-  return null;
-}
-
-async function findFileExtension(dir: string, baseName: string): Promise<string | null> {
-  if (!existsSync(dir)) return null;
-  try {
-    const files = await readdir(dir);
-    for (const file of files) {
-      if (file.toLowerCase().startsWith(baseName.toLowerCase() + '.')) {
-        return file.split('.').pop() || null;
-      }
-    }
-    const letterMatch = baseName.match(/^[qr](\d+)$/i);
-    if (letterMatch) {
-      const numPrefix = letterMatch[1] + '.';
-      for (const file of files) {
-        const lowerFile = file.toLowerCase();
-        if (lowerFile.startsWith(numPrefix) && /^[\d]/.test(file)) {
-          return file.split('.').pop() || null;
-        }
-      }
-    }
-  } catch {}
-  return null;
-}
-
 function getCategoryName(code: string): string {
   return { A: 'Moto', B: 'Voiture', C: 'Camion', D: 'Bus', E: 'Remorque' }[code] || code;
 }
@@ -618,20 +646,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing category or serie' }, { status: 400 });
   }
 
-  const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
-  const result = { path: `/uploads/${categoryCode}/${serieNumber}/`, images: [] as string[], audio: [] as string[], video: [] as string[], responses: [] as string[], exists: existsSync(uploadDir) };
+  const storagePrefix = `series/${categoryCode}/${serieNumber}`;
+  const result = { path: storagePrefix, images: [] as string[], audio: [] as string[], video: [] as string[], responses: [] as string[], exists: false };
 
-  if (result.exists) {
+  const { listFiles } = await import('@/lib/supabase');
+
+  const subDirs = [
+    { key: 'images' as const, folder: `${storagePrefix}/images`, exts: /\.(png|jpg|jpeg|gif|webp|bmp)$/i },
+    { key: 'audio' as const, folder: `${storagePrefix}/audio`, exts: /\.mp3$/i },
+    { key: 'video' as const, folder: `${storagePrefix}/video`, exts: /\.mp4$/i },
+    { key: 'responses' as const, folder: `${storagePrefix}/responses`, exts: /\.(png|jpg|jpeg|gif|webp|bmp)$/i },
+  ];
+
+  for (const sub of subDirs) {
     try {
-      const dirs = { images: 'images', audio: 'audio', video: 'video', responses: 'responses' } as const;
-      const exts = { images: /\.(png|jpg|jpeg|gif|webp|bmp)$/i, audio: /\.mp3$/i, video: /\.mp4$/i, responses: /\.(png|jpg|jpeg|gif|webp|bmp)$/i };
-      for (const [key, dir] of Object.entries(dirs)) {
-        const fullPath = path.join(uploadDir, dir);
-        if (existsSync(fullPath)) {
-          const files = await readdir(fullPath);
-          (result as Record<string, string[]>)[key] = files.filter(f => exts[key as keyof typeof exts].test(f));
-        }
-      }
+      const files = await listFiles(sub.folder);
+      if (files.length > 0) result.exists = true;
+      (result as Record<string, string[]>)[sub.key] = files.filter(f => sub.exts.test(f));
     } catch {}
   }
 

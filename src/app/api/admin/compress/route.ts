@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readdir, stat, mkdir, unlink, readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
+import { mkdir, unlink, readFile, writeFile, rm, stat } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
+import os from 'os';
 import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
+import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
 
-// GET /api/admin/compress - Get file stats for a serie
+// GET /api/admin/compress - Get file stats for a serie from Supabase Storage
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -18,10 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
-    if (!existsSync(uploadDir)) {
-      return NextResponse.json({ error: 'Série non trouvée' }, { status: 404 });
-    }
+    const storagePrefix = `series/${categoryCode}/${serieNumber}`;
 
     const stats = {
       images: { count: 0, totalSize: 0 },
@@ -30,17 +28,25 @@ export async function GET(request: NextRequest) {
       responses: { count: 0, totalSize: 0 },
     };
 
-    for (const [subDir] of [['images'], ['audio'], ['video'], ['responses']] as const) {
-      const dir = path.join(uploadDir, subDir);
-      if (!existsSync(dir)) continue;
-      const files = await readdir(dir);
-      for (const file of files) {
-        const filePath = path.join(dir, file);
-        const fileStat = await stat(filePath);
-        if (fileStat.isFile()) {
-          (stats[subDir] as { count: number; totalSize: number }).count++;
-          (stats[subDir] as { count: number; totalSize: number }).totalSize += fileStat.size;
+    const subDirs = ['images', 'audio', 'video', 'responses'] as const;
+    for (const subDir of subDirs) {
+      const folder = `${storagePrefix}/${subDir}`;
+      try {
+        const files = await listFiles(folder);
+        for (const file of files) {
+          // Get metadata to check size
+          try {
+            const { data: fileData } = await supabase.storage.from('uploads').list(folder, {
+              search: file,
+            });
+            if (fileData && fileData.length > 0) {
+              (stats[subDir] as { count: number; totalSize: number }).count++;
+              (stats[subDir] as { count: number; totalSize: number }).totalSize += fileData[0].metadata?.size || 0;
+            }
+          } catch {}
         }
+      } catch {
+        // Folder doesn't exist - skip
       }
     }
 
@@ -53,7 +59,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/admin/compress - Compress files in place
+// POST /api/admin/compress - Compress files in place (Supabase Storage)
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -63,19 +69,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing category or serie' }, { status: 400 });
   }
 
-  const jobId = randomUUID();
-  const tempDir = path.join(process.cwd(), 'public', 'uploads', '_temp_compress', jobId);
+  const storagePrefix = `series/${categoryCode}/${serieNumber}`;
+  const tempDir = path.join(os.tmpdir(), `compress_${randomUUID()}`);
 
   try {
     await mkdir(tempDir, { recursive: true });
-
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', categoryCode, serieNumber);
-    if (!existsSync(uploadDir)) {
-      return NextResponse.json({ error: 'Série non trouvée' }, { status: 404 });
-    }
-
-    // Taille avant
-    const beforeResult = await getSize(uploadDir);
 
     const result = {
       images: { compressed: 0, beforeBytes: 0, afterBytes: 0 },
@@ -85,179 +83,192 @@ export async function POST(request: NextRequest) {
     };
 
     // 1. Compress images → WebP max 1024px, qualité 75%
-    const imagesDir = path.join(uploadDir, 'images');
-    const outImagesDir = path.join(tempDir, 'images');
-    if (existsSync(imagesDir)) {
-      await mkdir(outImagesDir, { recursive: true });
-      const files = await readdir(imagesDir);
+    const imagesFolder = `${storagePrefix}/images`;
+    try {
+      const files = await listFiles(imagesFolder);
       for (const file of files) {
         const ext = path.extname(file).toLowerCase();
         if (!['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'].includes(ext)) continue;
-        const inputPath = path.join(imagesDir, file);
-        const originalSize = (await stat(inputPath)).size;
-        const outName = file.replace(/\.[^.]+$/, '.webp');
-        const outputPath = path.join(outImagesDir, outName);
 
+        const storagePath = `${imagesFolder}/${file}`;
         try {
-          await sharp(inputPath)
-            .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-            .webp({ quality: 75 })
-            .toFile(outputPath);
-          const newSize = (await stat(outputPath)).size;
-          result.images.compressed++;
-          result.images.beforeBytes += originalSize;
-          result.images.afterBytes += newSize;
-        } catch {
-          // Copier original si échec
-          const buf = await readFile(inputPath);
-          await writeFile(path.join(outImagesDir, file), buf);
-          result.images.compressed++;
-          result.images.beforeBytes += originalSize;
-          result.images.afterBytes += originalSize;
+          const fileData = await downloadFile(storagePath);
+          const originalSize = fileData.length;
+          const outName = file.replace(/\.[^.]+$/, '.webp');
+          const tmpIn = path.join(tempDir, `img_in_${file}`);
+          const tmpOut = path.join(tempDir, `img_out_${outName}`);
+
+          try {
+            await writeFile(tmpIn, fileData);
+            await sharp(tmpIn)
+              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 75 })
+              .toFile(tmpOut);
+            const outData = await readFile(tmpOut);
+            const newSize = outData.length;
+
+            const newStoragePath = `${imagesFolder}/${outName}`;
+            await uploadFile(newStoragePath, outData, 'image/webp');
+
+            // Remove old file if name changed
+            if (outName !== file) {
+              try { await supabase.storage.from('uploads').remove([storagePath]); } catch {}
+            }
+
+            result.images.compressed++;
+            result.images.beforeBytes += originalSize;
+            result.images.afterBytes += newSize;
+          } catch {
+            // Keep original on failure
+          } finally {
+            await unlink(tmpIn).catch(() => {});
+            await unlink(tmpOut).catch(() => {});
+          }
+        } catch (err) {
+          console.error(`Failed to download image ${file}:`, err);
         }
       }
-    }
+    } catch {}
 
     // 2. Compress response images
-    const responsesDir = path.join(uploadDir, 'responses');
-    const outResponsesDir = path.join(tempDir, 'responses');
-    if (existsSync(responsesDir)) {
-      await mkdir(outResponsesDir, { recursive: true });
-      const files = await readdir(responsesDir);
+    const responsesFolder = `${storagePrefix}/responses`;
+    try {
+      const files = await listFiles(responsesFolder);
       for (const file of files) {
         const ext = path.extname(file).toLowerCase();
         if (!['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'].includes(ext)) continue;
-        const inputPath = path.join(responsesDir, file);
-        const originalSize = (await stat(inputPath)).size;
-        const outName = file.replace(/\.[^.]+$/, '.webp');
-        const outputPath = path.join(outResponsesDir, outName);
 
+        const storagePath = `${responsesFolder}/${file}`;
         try {
-          await sharp(inputPath)
-            .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-            .webp({ quality: 75 })
-            .toFile(outputPath);
-          const newSize = (await stat(outputPath)).size;
-          result.responses.compressed++;
-          result.responses.beforeBytes += originalSize;
-          result.responses.afterBytes += newSize;
-        } catch {
-          const buf = await readFile(inputPath);
-          await writeFile(path.join(outResponsesDir, file), buf);
-          result.responses.compressed++;
-          result.responses.beforeBytes += originalSize;
-          result.responses.afterBytes += originalSize;
+          const fileData = await downloadFile(storagePath);
+          const originalSize = fileData.length;
+          const outName = file.replace(/\.[^.]+$/, '.webp');
+          const tmpIn = path.join(tempDir, `resp_in_${file}`);
+          const tmpOut = path.join(tempDir, `resp_out_${outName}`);
+
+          try {
+            await writeFile(tmpIn, fileData);
+            await sharp(tmpIn)
+              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 75 })
+              .toFile(tmpOut);
+            const outData = await readFile(tmpOut);
+            const newSize = outData.length;
+
+            const newStoragePath = `${responsesFolder}/${outName}`;
+            await uploadFile(newStoragePath, outData, 'image/webp');
+
+            if (outName !== file) {
+              try { await supabase.storage.from('uploads').remove([storagePath]); } catch {}
+            }
+
+            result.responses.compressed++;
+            result.responses.beforeBytes += originalSize;
+            result.responses.afterBytes += newSize;
+          } catch {
+            // Keep original on failure
+          } finally {
+            await unlink(tmpIn).catch(() => {});
+            await unlink(tmpOut).catch(() => {});
+          }
+        } catch (err) {
+          console.error(`Failed to download response ${file}:`, err);
         }
       }
-    }
+    } catch {}
 
     // 3. Compress audio → 64kbps mono MP3
-    const audioDir = path.join(uploadDir, 'audio');
-    const outAudioDir = path.join(tempDir, 'audio');
-    if (existsSync(audioDir)) {
-      await mkdir(outAudioDir, { recursive: true });
-      const files = await readdir(audioDir);
+    const audioFolder = `${storagePrefix}/audio`;
+    try {
+      const files = await listFiles(audioFolder);
       for (const file of files) {
         if (!file.endsWith('.mp3')) continue;
-        const inputPath = path.join(audioDir, file);
-        const originalSize = (await stat(inputPath)).size;
-        const outputPath = path.join(outAudioDir, file);
 
+        const storagePath = `${audioFolder}/${file}`;
         try {
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg(inputPath)
-              .audioBitrate('64k')
-              .audioChannels(1)
-              .output(outputPath)
-              .on('end', resolve)
-              .on('error', reject)
-              .run();
-          });
-          const newSize = (await stat(outputPath)).size;
-          result.audio.compressed++;
-          result.audio.beforeBytes += originalSize;
-          result.audio.afterBytes += newSize;
-        } catch {
-          const buf = await readFile(inputPath);
-          await writeFile(outputPath, buf);
-          result.audio.compressed++;
-          result.audio.beforeBytes += originalSize;
-          result.audio.afterBytes += originalSize;
+          const fileData = await downloadFile(storagePath);
+          const originalSize = fileData.length;
+          const tmpIn = path.join(tempDir, `audio_in_${file}`);
+          const tmpOut = path.join(tempDir, `audio_out_${file}`);
+
+          try {
+            await writeFile(tmpIn, fileData);
+            await new Promise<void>((resolve, reject) => {
+              ffmpeg(tmpIn)
+                .audioBitrate('64k')
+                .audioChannels(1)
+                .output(tmpOut)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+            });
+            const outData = await readFile(tmpOut);
+            const newSize = outData.length;
+
+            await uploadFile(storagePath, outData, 'audio/mpeg');
+
+            result.audio.compressed++;
+            result.audio.beforeBytes += originalSize;
+            result.audio.afterBytes += newSize;
+          } catch {
+            // Keep original on failure
+          } finally {
+            await unlink(tmpIn).catch(() => {});
+            await unlink(tmpOut).catch(() => {});
+          }
+        } catch (err) {
+          console.error(`Failed to download audio ${file}:`, err);
         }
       }
-    }
+    } catch {}
 
     // 4. Compress vidéo → 480p, 500kbps
-    const videoDir = path.join(uploadDir, 'video');
-    const outVideoDir = path.join(tempDir, 'video');
-    if (existsSync(videoDir)) {
-      await mkdir(outVideoDir, { recursive: true });
-      const files = await readdir(videoDir);
+    const videoFolder = `${storagePrefix}/video`;
+    try {
+      const files = await listFiles(videoFolder);
       for (const file of files) {
         if (!file.endsWith('.mp4')) continue;
-        const inputPath = path.join(videoDir, file);
-        const originalSize = (await stat(inputPath)).size;
-        const outputPath = path.join(outVideoDir, file);
 
+        const storagePath = `${videoFolder}/${file}`;
         try {
-          await new Promise<void>((resolve, reject) => {
-            ffmpeg(inputPath)
-              .size('854x480')
-              .videoBitrate('500k')
-              .audioBitrate('64k')
-              .output(outputPath)
-              .on('end', resolve)
-              .on('error', reject)
-              .run();
-          });
-          const newSize = (await stat(outputPath)).size;
-          result.video.compressed++;
-          result.video.beforeBytes += originalSize;
-          result.video.afterBytes += newSize;
-        } catch {
-          const buf = await readFile(inputPath);
-          await writeFile(outputPath, buf);
-          result.video.compressed++;
-          result.video.beforeBytes += originalSize;
-          result.video.afterBytes += originalSize;
+          const fileData = await downloadFile(storagePath);
+          const originalSize = fileData.length;
+          const tmpIn = path.join(tempDir, `video_in_${file}`);
+          const tmpOut = path.join(tempDir, `video_out_${file}`);
+
+          try {
+            await writeFile(tmpIn, fileData);
+            await new Promise<void>((resolve, reject) => {
+              ffmpeg(tmpIn)
+                .size('854x480')
+                .videoBitrate('500k')
+                .audioBitrate('64k')
+                .output(tmpOut)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+            });
+            const outData = await readFile(tmpOut);
+            const newSize = outData.length;
+
+            await uploadFile(storagePath, outData, 'video/mp4');
+
+            result.video.compressed++;
+            result.video.beforeBytes += originalSize;
+            result.video.afterBytes += newSize;
+          } catch {
+            // Keep original on failure
+          } finally {
+            await unlink(tmpIn).catch(() => {});
+            await unlink(tmpOut).catch(() => {});
+          }
+        } catch (err) {
+          console.error(`Failed to download video ${file}:`, err);
         }
       }
-    }
+    } catch {}
 
-    // 5. Remplacer les fichiers originaux par les compressés
-    const dirsToReplace: { src: string; dst: string }[] = [
-      { src: outImagesDir, dst: path.join(uploadDir, 'images') },
-      { src: outResponsesDir, dst: path.join(uploadDir, 'responses') },
-      { src: outAudioDir, dst: path.join(uploadDir, 'audio') },
-      { src: outVideoDir, dst: path.join(uploadDir, 'video') },
-    ];
-
-    for (const { src, dst } of dirsToReplace) {
-      if (!existsSync(src)) continue;
-      // Supprimer anciens fichiers
-      if (existsSync(dst)) {
-        const oldFiles = await readdir(dst);
-        for (const oldFile of oldFiles) await unlink(path.join(dst, oldFile));
-      } else {
-        await mkdir(dst, { recursive: true });
-      }
-      // Copier nouveaux
-      const newFiles = await readdir(src);
-      for (const newFile of newFiles) {
-        await writeFile(path.join(dst, newFile), await readFile(path.join(src, newFile)));
-      }
-    }
-
-    // 6. Nettoyer temp
-    for (const { src } of dirsToReplace) {
-      if (!existsSync(src)) continue;
-      const files = await readdir(src);
-      for (const f of files) await unlink(path.join(src, f));
-      await unlink(src);
-    }
-    await unlink(tempDir);
-
-    // 7. Mettre à jour les chemins dans la base de données directement
+    // 5. Update DB paths to reflect any file name changes (e.g., .png → .webp)
     try {
       const category = await db.category.findUnique({ where: { code: categoryCode } });
       if (category) {
@@ -268,32 +279,38 @@ export async function POST(request: NextRequest) {
           for (const q of questions) {
             const update: { image?: string; audio?: string; text?: string; video?: string } = {};
 
+            // Check each path and verify it exists in storage
+            const imgFolder = `${storagePrefix}/images`;
+            const audioFolder = `${storagePrefix}/audio`;
+            const respFolder = `${storagePrefix}/responses`;
+            const videoFolder = `${storagePrefix}/video`;
+
             // Fix image path
             if (q.image) {
-              const fixed = await findNewPath(uploadDir, 'images', q.image, q.order, ['q', '']);
-              if (fixed && fixed !== q.image) update.image = fixed;
-              else if (!fileExists(q.image)) update.image = '';
+              const fixed = await findFileInStorage(imgFolder, q.order, ['q', '']);
+              const publicUrl = fixed ? getPublicUrl(fixed) : '';
+              if (publicUrl !== q.image) update.image = publicUrl;
             }
 
-            // Fix audio path (audio reste mp3, pas d'extension change)
-            if (q.audio && !fileExists(q.audio)) {
-              const audioDir = path.join(uploadDir, 'audio');
-              const found = await findExistingFile(audioDir, q.order, ['q', ''], ['mp3']);
-              update.audio = found || '';
+            // Fix audio path
+            if (q.audio) {
+              const fixed = await findFileInStorage(audioFolder, q.order, ['q', ''], ['mp3']);
+              const publicUrl = fixed ? getPublicUrl(fixed) : '';
+              if (publicUrl !== q.audio) update.audio = publicUrl;
             }
 
-            // Fix response image (text field)
+            // Fix response image
             if (q.text) {
-              const fixed = await findNewPath(uploadDir, 'responses', q.text, q.order, ['r', 'R']);
-              if (fixed && fixed !== q.text) update.text = fixed;
-              else if (!fileExists(q.text)) update.text = '';
+              const fixed = await findFileInStorage(respFolder, q.order, ['r', 'R']);
+              const publicUrl = fixed ? getPublicUrl(fixed) : '';
+              if (publicUrl !== q.text) update.text = publicUrl;
             }
 
             // Fix video path
-            if (q.video && !fileExists(q.video)) {
-              const videoDir = path.join(uploadDir, 'video');
-              const found = await findExistingFile(videoDir, q.order, ['q', ''], ['mp4']);
-              update.video = found || null;
+            if (q.video) {
+              const fixed = await findFileInStorage(videoFolder, q.order, ['q', ''], ['mp4']);
+              const publicUrl = fixed ? getPublicUrl(fixed) : null;
+              if (publicUrl !== q.video) update.video = publicUrl;
             }
 
             if (Object.keys(update).length > 0) {
@@ -306,9 +323,6 @@ export async function POST(request: NextRequest) {
       console.error('DB update error after compress:', dbError);
     }
 
-    // Taille après
-    const afterResult = await getSize(uploadDir);
-
     const totalBefore = result.images.beforeBytes + result.audio.beforeBytes + result.video.beforeBytes + result.responses.beforeBytes;
     const totalAfter = result.images.afterBytes + result.audio.afterBytes + result.video.afterBytes + result.responses.afterBytes;
     const totalSaved = totalBefore - totalAfter;
@@ -316,80 +330,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       result,
-      beforeSize: beforeResult,
-      afterSize: afterResult,
       totalSaved,
+      totalBefore,
+      totalAfter,
     });
   } catch (error) {
     console.error('Compression error:', error);
-    // Cleanup
-    try {
-      if (existsSync(tempDir)) {
-        const { rm } = await import('fs/promises');
-        await rm(tempDir, { recursive: true, force: true });
-      }
-    } catch {}
     return NextResponse.json({ error: 'Compression failed: ' + (error as Error).message }, { status: 500 });
+  } finally {
+    try {
+      await rm(tempDir, { recursive: true, force: true });
+    } catch {}
   }
 }
 
-async function getSize(uploadDir: string): Promise<number> {
-  let total = 0;
-  for (const subDir of ['images', 'audio', 'video', 'responses']) {
-    const dir = path.join(uploadDir, subDir);
-    if (!existsSync(dir)) continue;
-    const files = await readdir(dir);
-    for (const file of files) {
-      try { total += (await stat(path.join(dir, file))).size; } catch {}
-    }
-  }
-  return total;
-}
-
-function fileExists(urlPath: string): boolean {
-  return existsSync(path.join(process.cwd(), 'public', urlPath));
-}
-
-// Trouver le nouveau chemin d'un fichier après compression (ex: q1.png → q1.webp)
-async function findNewPath(uploadDir: string, subDir: string, oldUrlPath: string, questionNum: number, prefixes: string[]): Promise<string | null> {
-  const dir = path.join(uploadDir, subDir);
-  if (!existsSync(dir)) return null;
-
+// Find a file in Supabase Storage folder by question number and prefixes
+async function findFileInStorage(folder: string, questionNum: number, prefixes: string[], exts?: string[]): Promise<string | null> {
   try {
-    const files = await readdir(dir);
-    const num = questionNum;
-    const imageExts = ['webp', 'png', 'jpg', 'jpeg', 'gif'];
+    const { data, error } = await supabase.storage.from('uploads').list(folder);
+    if (error || !data || data.length === 0) return null;
 
-    // Essayer chaque prefix avec chaque extension
+    const defaultExts = exts || ['webp', 'png', 'jpg', 'jpeg', 'gif'];
+    const num = questionNum;
+
     for (const prefix of prefixes) {
       const baseName = prefix ? `${prefix}${num}` : `${num}`;
-      for (const ext of imageExts) {
+      for (const ext of defaultExts) {
         const target = `${baseName}.${ext}`;
-        const match = files.find(f => f.toLowerCase() === target.toLowerCase());
+        const match = data.find(f => f.name.toLowerCase() === target.toLowerCase());
         if (match) {
-          return `/uploads/${path.basename(uploadDir)}/${subDir}/${match}`;
-        }
-      }
-    }
-  } catch {}
-  return null;
-}
-
-// Trouver un fichier existant par numéro de question
-async function findExistingFile(dir: string, questionNum: number, prefixes: string[], exts: string[]): Promise<string | null> {
-  if (!existsSync(dir)) return null;
-  try {
-    const files = await readdir(dir);
-    const num = questionNum;
-    for (const prefix of prefixes) {
-      const baseName = prefix ? `${prefix}${num}` : `${num}`;
-      for (const ext of exts) {
-        const target = `${baseName}.${ext}`;
-        const match = files.find(f => f.toLowerCase() === target.toLowerCase());
-        if (match) {
-          // Construire le chemin URL relatif
-          const parts = dir.split('/').slice(-3); // uploads/cat/serie/audio ou images
-          return `/${parts.join('/')}/${match}`;
+          return `${folder}/${match.name}`;
         }
       }
     }

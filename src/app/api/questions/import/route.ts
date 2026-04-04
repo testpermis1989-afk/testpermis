@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import * as xlsx from 'xlsx';
+import { getPublicUrl } from '@/lib/supabase';
 
 // POST /api/questions/import - Import questions from Excel
 export async function POST(request: NextRequest) {
@@ -61,14 +62,18 @@ export async function POST(request: NextRequest) {
 
       if (isNaN(questionNumber)) continue;
 
-      // Create question with image, audio, and response image
+      // Create question with Supabase Storage public URLs
+      const imageStoragePath = `series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`;
+      const audioStoragePath = `series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`;
+      const responseStoragePath = `series/${categoryCode}/${serieNumber}/responses/r${questionNumber}.png`;
+
       const question = await db.question.create({
         data: {
           serieId: serie.id,
           order: questionNumber,
-          image: `/uploads/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`,
-          audio: `/uploads/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`,
-          text: `/uploads/${categoryCode}/${serieNumber}/responses/r${questionNumber}.png`, // Response image
+          image: getPublicUrl(imageStoragePath),
+          audio: getPublicUrl(audioStoragePath),
+          text: getPublicUrl(responseStoragePath),
         },
       });
 
