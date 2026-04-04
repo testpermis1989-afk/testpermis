@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mkdir, unlink, readFile, writeFile, rm, stat } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import ffmpeg from 'fluent-ffmpeg';
-import os from 'os';
-import { randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
 
@@ -34,7 +30,6 @@ export async function GET(request: NextRequest) {
       try {
         const files = await listFiles(folder);
         for (const file of files) {
-          // Get metadata to check size
           try {
             const { data: fileData } = await supabase.storage.from('uploads').list(folder, {
               search: file,
@@ -45,9 +40,7 @@ export async function GET(request: NextRequest) {
             }
           } catch {}
         }
-      } catch {
-        // Folder doesn't exist - skip
-      }
+      } catch {}
     }
 
     const totalSize = stats.images.totalSize + stats.audio.totalSize + stats.video.totalSize + stats.responses.totalSize;
@@ -60,6 +53,7 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/compress - Compress files in place (Supabase Storage)
+// Serverless-compatible: uses sharp with Buffers, skips ffmpeg
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -70,11 +64,8 @@ export async function POST(request: NextRequest) {
   }
 
   const storagePrefix = `series/${categoryCode}/${serieNumber}`;
-  const tempDir = path.join(os.tmpdir(), `compress_${randomUUID()}`);
 
   try {
-    await mkdir(tempDir, { recursive: true });
-
     const result = {
       images: { compressed: 0, beforeBytes: 0, afterBytes: 0 },
       audio: { compressed: 0, beforeBytes: 0, afterBytes: 0 },
@@ -82,7 +73,7 @@ export async function POST(request: NextRequest) {
       responses: { compressed: 0, beforeBytes: 0, afterBytes: 0 },
     };
 
-    // 1. Compress images → WebP max 1024px, qualité 75%
+    // 1. Compress images → WebP max 1024px, qualité 75% (Buffer-based sharp!)
     const imagesFolder = `${storagePrefix}/images`;
     try {
       const files = await listFiles(imagesFolder);
@@ -95,20 +86,18 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(storagePath);
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.webp');
-          const tmpIn = path.join(tempDir, `img_in_${file}`);
-          const tmpOut = path.join(tempDir, `img_out_${outName}`);
 
           try {
-            await writeFile(tmpIn, fileData);
-            await sharp(tmpIn)
+            // Sharp with Buffers - no filesystem needed!
+            const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
               .webp({ quality: 75 })
-              .toFile(tmpOut);
-            const outData = await readFile(tmpOut);
-            const newSize = outData.length;
+              .toBuffer();
+
+            const newSize = outputBuffer.length;
 
             const newStoragePath = `${imagesFolder}/${outName}`;
-            await uploadFile(newStoragePath, outData, 'image/webp');
+            await uploadFile(newStoragePath, outputBuffer, 'image/webp');
 
             // Remove old file if name changed
             if (outName !== file) {
@@ -120,9 +109,6 @@ export async function POST(request: NextRequest) {
             result.images.afterBytes += newSize;
           } catch {
             // Keep original on failure
-          } finally {
-            await unlink(tmpIn).catch(() => {});
-            await unlink(tmpOut).catch(() => {});
           }
         } catch (err) {
           console.error(`Failed to download image ${file}:`, err);
@@ -130,7 +116,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // 2. Compress response images
+    // 2. Compress response images (Buffer-based sharp!)
     const responsesFolder = `${storagePrefix}/responses`;
     try {
       const files = await listFiles(responsesFolder);
@@ -143,20 +129,17 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(storagePath);
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.webp');
-          const tmpIn = path.join(tempDir, `resp_in_${file}`);
-          const tmpOut = path.join(tempDir, `resp_out_${outName}`);
 
           try {
-            await writeFile(tmpIn, fileData);
-            await sharp(tmpIn)
+            const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
               .webp({ quality: 75 })
-              .toFile(tmpOut);
-            const outData = await readFile(tmpOut);
-            const newSize = outData.length;
+              .toBuffer();
+
+            const newSize = outputBuffer.length;
 
             const newStoragePath = `${responsesFolder}/${outName}`;
-            await uploadFile(newStoragePath, outData, 'image/webp');
+            await uploadFile(newStoragePath, outputBuffer, 'image/webp');
 
             if (outName !== file) {
               try { await supabase.storage.from('uploads').remove([storagePath]); } catch {}
@@ -167,9 +150,6 @@ export async function POST(request: NextRequest) {
             result.responses.afterBytes += newSize;
           } catch {
             // Keep original on failure
-          } finally {
-            await unlink(tmpIn).catch(() => {});
-            await unlink(tmpOut).catch(() => {});
           }
         } catch (err) {
           console.error(`Failed to download response ${file}:`, err);
@@ -177,98 +157,38 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // 3. Compress audio → 64kbps mono MP3
+    // 3. Audio & Video - skip compression (ffmpeg not available on Vercel)
     const audioFolder = `${storagePrefix}/audio`;
     try {
       const files = await listFiles(audioFolder);
       for (const file of files) {
         if (!file.endsWith('.mp3')) continue;
-
         const storagePath = `${audioFolder}/${file}`;
         try {
           const fileData = await downloadFile(storagePath);
-          const originalSize = fileData.length;
-          const tmpIn = path.join(tempDir, `audio_in_${file}`);
-          const tmpOut = path.join(tempDir, `audio_out_${file}`);
-
-          try {
-            await writeFile(tmpIn, fileData);
-            await new Promise<void>((resolve, reject) => {
-              ffmpeg(tmpIn)
-                .audioBitrate('64k')
-                .audioChannels(1)
-                .output(tmpOut)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-            });
-            const outData = await readFile(tmpOut);
-            const newSize = outData.length;
-
-            await uploadFile(storagePath, outData, 'audio/mpeg');
-
-            result.audio.compressed++;
-            result.audio.beforeBytes += originalSize;
-            result.audio.afterBytes += newSize;
-          } catch {
-            // Keep original on failure
-          } finally {
-            await unlink(tmpIn).catch(() => {});
-            await unlink(tmpOut).catch(() => {});
-          }
-        } catch (err) {
-          console.error(`Failed to download audio ${file}:`, err);
-        }
+          result.audio.compressed++;
+          result.audio.beforeBytes += fileData.length;
+          result.audio.afterBytes += fileData.length;
+        } catch {}
       }
     } catch {}
 
-    // 4. Compress vidéo → 480p, 500kbps
     const videoFolder = `${storagePrefix}/video`;
     try {
       const files = await listFiles(videoFolder);
       for (const file of files) {
         if (!file.endsWith('.mp4')) continue;
-
         const storagePath = `${videoFolder}/${file}`;
         try {
           const fileData = await downloadFile(storagePath);
-          const originalSize = fileData.length;
-          const tmpIn = path.join(tempDir, `video_in_${file}`);
-          const tmpOut = path.join(tempDir, `video_out_${file}`);
-
-          try {
-            await writeFile(tmpIn, fileData);
-            await new Promise<void>((resolve, reject) => {
-              ffmpeg(tmpIn)
-                .size('854x480')
-                .videoBitrate('500k')
-                .audioBitrate('64k')
-                .output(tmpOut)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-            });
-            const outData = await readFile(tmpOut);
-            const newSize = outData.length;
-
-            await uploadFile(storagePath, outData, 'video/mp4');
-
-            result.video.compressed++;
-            result.video.beforeBytes += originalSize;
-            result.video.afterBytes += newSize;
-          } catch {
-            // Keep original on failure
-          } finally {
-            await unlink(tmpIn).catch(() => {});
-            await unlink(tmpOut).catch(() => {});
-          }
-        } catch (err) {
-          console.error(`Failed to download video ${file}:`, err);
-        }
+          result.video.compressed++;
+          result.video.beforeBytes += fileData.length;
+          result.video.afterBytes += fileData.length;
+        } catch {}
       }
     } catch {}
 
-    // 5. Update DB paths to reflect any file name changes (e.g., .png → .webp)
+    // 4. Update DB paths to reflect any file name changes (e.g., .png → .webp)
     try {
       const category = await db.category.findUnique({ where: { code: categoryCode } });
       if (category) {
@@ -279,15 +199,9 @@ export async function POST(request: NextRequest) {
           for (const q of questions) {
             const update: { image?: string; audio?: string; text?: string; video?: string } = {};
 
-            // Check each path and verify it exists in storage
-            const imgFolder = `${storagePrefix}/images`;
-            const audioFolder = `${storagePrefix}/audio`;
-            const respFolder = `${storagePrefix}/responses`;
-            const videoFolder = `${storagePrefix}/video`;
-
             // Fix image path
             if (q.image) {
-              const fixed = await findFileInStorage(imgFolder, q.order, ['q', '']);
+              const fixed = await findFileInStorage(imagesFolder, q.order, ['q', '']);
               const publicUrl = fixed ? getPublicUrl(fixed) : '';
               if (publicUrl !== q.image) update.image = publicUrl;
             }
@@ -301,7 +215,7 @@ export async function POST(request: NextRequest) {
 
             // Fix response image
             if (q.text) {
-              const fixed = await findFileInStorage(respFolder, q.order, ['r', 'R']);
+              const fixed = await findFileInStorage(`${storagePrefix}/responses`, q.order, ['r', 'R']);
               const publicUrl = fixed ? getPublicUrl(fixed) : '';
               if (publicUrl !== q.text) update.text = publicUrl;
             }
@@ -337,10 +251,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Compression error:', error);
     return NextResponse.json({ error: 'Compression failed: ' + (error as Error).message }, { status: 500 });
-  } finally {
-    try {
-      await rm(tempDir, { recursive: true, force: true });
-    } catch {}
   }
 }
 

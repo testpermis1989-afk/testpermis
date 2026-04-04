@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mkdir, unlink, readFile, writeFile, rm, stat } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import ffmpeg from 'fluent-ffmpeg';
-import os from 'os';
-import { supabase, uploadFile, getPublicUrl, downloadFile, listFiles } from '@/lib/supabase';
+import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
 
 // POST /api/series/repair - Réparer les fichiers corrompus d'une série existante (from Supabase Storage)
+// Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -17,352 +15,162 @@ export async function POST(request: NextRequest) {
     }
 
     const storagePrefix = `series/${category}/${serie}`;
-    const tempDir = path.join(os.tmpdir(), `repair_${category}_${serie}_${Date.now()}`);
-    await mkdir(tempDir, { recursive: true });
 
+    const report = {
+      repaired: [] as string[],
+      removed: [] as string[],
+      errors: [] as string[],
+    };
+
+    // Réparer les images (sharp with Buffers - no filesystem needed!)
+    const imagesFolder = `${storagePrefix}/images`;
     try {
-      const report = {
-        repaired: [] as string[],
-        removed: [] as string[],
-        errors: [] as string[],
-      };
+      const images = await listFiles(imagesFolder);
+      for (const img of images) {
+        const ext = path.extname(img).toLowerCase();
+        if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
 
-      const MIME_TYPES: Record<string, string> = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp',
-        '.bmp': 'image/bmp',
-        '.mp3': 'audio/mpeg',
-        '.mp4': 'video/mp4',
-      };
+        const imgStoragePath = `${imagesFolder}/${img}`;
+        try {
+          const fileData = await downloadFile(imgStoragePath);
+          if (isValidImage(fileData)) continue; // Déjà valide
 
-      // Réparer les images
-      const imagesFolder = `${storagePrefix}/images`;
-      try {
-        const images = await listFiles(imagesFolder);
-        for (const img of images) {
-          const ext = path.extname(img).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
-
-          const imgStoragePath = `${imagesFolder}/${img}`;
+          // Réparer avec sharp (Buffer-based, no filesystem!)
           try {
-            const fileData = await downloadFile(imgStoragePath);
-            if (isValidImage(fileData)) continue; // Déjà valide
+            const outputBuffer = await sharp(fileData)
+              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 75 })
+              .toBuffer();
 
-            // Essayer de réparer avec sharp
-            const tmpIn = path.join(tempDir, `img_in_${img}`);
-            const tmpOut = path.join(tempDir, `img_out_${img.replace(/\.[^.]+$/, '.webp')}`);
-            try {
-              await writeFile(tmpIn, fileData);
-              await sharp(tmpIn)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .webp({ quality: 75 })
-                .toFile(tmpOut);
-              const outData = await readFile(tmpOut);
-              if (outData.length > 0 && isValidImage(outData)) {
-                const newImgName = img.replace(/\.[^.]+$/, '.webp');
-                const newStoragePath = `${imagesFolder}/${newImgName}`;
-                await uploadFile(newStoragePath, outData, 'image/webp');
-                report.repaired.push(`images/${img} → ${newImgName}`);
+            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
+              const newImgName = img.replace(/\.[^.]+$/, '.webp');
+              const newStoragePath = `${imagesFolder}/${newImgName}`;
+              await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+              report.repaired.push(`images/${img} → ${newImgName}`);
 
-                // Remove old file if name changed
-                if (newImgName !== img) {
-                  try {
-                    await supabase.storage.from('uploads').remove([imgStoragePath]);
-                  } catch {}
-                }
-              } else {
+              // Remove old file if name changed
+              if (newImgName !== img) {
                 try {
                   await supabase.storage.from('uploads').remove([imgStoragePath]);
                 } catch {}
-                report.removed.push(`images/${img}`);
               }
-            } catch {
+            } else {
               try {
                 await supabase.storage.from('uploads').remove([imgStoragePath]);
               } catch {}
               report.removed.push(`images/${img}`);
-            } finally {
-              await unlink(tmpIn).catch(() => {});
-              await unlink(tmpOut).catch(() => {});
             }
-          } catch (err) {
-            console.error(`Error downloading image ${img}:`, err);
-          }
-        }
-      } catch {}
-
-      // Réparer les audios
-      const audioFolder = `${storagePrefix}/audio`;
-      try {
-        const audios = await listFiles(audioFolder);
-        for (const audio of audios) {
-          if (!audio.toLowerCase().endsWith('.mp3')) continue;
-
-          const audioStoragePath = `${audioFolder}/${audio}`;
-          try {
-            const fileData = await downloadFile(audioStoragePath);
-            if (isValidMp3(fileData)) continue;
-
-            const repaired = await tryRepairAudio(fileData, audio, tempDir);
-            if (repaired && repaired.length > 0 && isValidMp3(repaired)) {
-              await uploadFile(audioStoragePath, repaired, 'audio/mpeg');
-              report.repaired.push(`audio/${audio}`);
-            } else {
-              try {
-                await supabase.storage.from('uploads').remove([audioStoragePath]);
-              } catch {}
-              report.removed.push(`audio/${audio}`);
-            }
-          } catch (err) {
-            console.error(`Error downloading audio ${audio}:`, err);
-          }
-        }
-      } catch {}
-
-      // Réparer les vidéos
-      const videoFolder = `${storagePrefix}/video`;
-      try {
-        const videos = await listFiles(videoFolder);
-        for (const video of videos) {
-          if (!video.toLowerCase().endsWith('.mp4')) continue;
-
-          const videoStoragePath = `${videoFolder}/${video}`;
-          try {
-            const fileData = await downloadFile(videoStoragePath);
-            if (isValidMp4(fileData)) continue;
-
-            const repaired = await tryRepairVideo(fileData, video, tempDir);
-            if (repaired && repaired.length > 0 && isValidMp4(repaired)) {
-              await uploadFile(videoStoragePath, repaired, 'video/mp4');
-              report.repaired.push(`video/${video}`);
-            } else {
-              try {
-                await supabase.storage.from('uploads').remove([videoStoragePath]);
-              } catch {}
-              report.removed.push(`video/${video}`);
-            }
-          } catch (err) {
-            console.error(`Error downloading video ${video}:`, err);
-          }
-        }
-      } catch {}
-
-      // Réparer les images de réponses
-      const responsesFolder = `${storagePrefix}/responses`;
-      try {
-        const responses = await listFiles(responsesFolder);
-        for (const resp of responses) {
-          const ext = path.extname(resp).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
-
-          const respStoragePath = `${responsesFolder}/${resp}`;
-          try {
-            const fileData = await downloadFile(respStoragePath);
-            if (isValidImage(fileData)) continue;
-
-            const tmpIn = path.join(tempDir, `resp_in_${resp}`);
-            const tmpOut = path.join(tempDir, `resp_out_${resp.replace(/\.[^.]+$/, '.webp')}`);
+          } catch {
             try {
-              await writeFile(tmpIn, fileData);
-              await sharp(tmpIn)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .webp({ quality: 75 })
-                .toFile(tmpOut);
-              const outData = await readFile(tmpOut);
-              if (outData.length > 0 && isValidImage(outData)) {
-                const newRespName = resp.replace(/\.[^.]+$/, '.webp');
-                const newStoragePath = `${responsesFolder}/${newRespName}`;
-                await uploadFile(newStoragePath, outData, 'image/webp');
-                report.repaired.push(`responses/${resp} → ${newRespName}`);
-                if (newRespName !== resp) {
-                  try {
-                    await supabase.storage.from('uploads').remove([respStoragePath]);
-                  } catch {}
-                }
-              } else {
+              await supabase.storage.from('uploads').remove([imgStoragePath]);
+            } catch {}
+            report.removed.push(`images/${img}`);
+          }
+        } catch (err) {
+          console.error(`Error downloading image ${img}:`, err);
+        }
+      }
+    } catch {}
+
+    // Réparer les images de réponses
+    const responsesFolder = `${storagePrefix}/responses`;
+    try {
+      const responses = await listFiles(responsesFolder);
+      for (const resp of responses) {
+        const ext = path.extname(resp).toLowerCase();
+        if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
+
+        const respStoragePath = `${responsesFolder}/${resp}`;
+        try {
+          const fileData = await downloadFile(respStoragePath);
+          if (isValidImage(fileData)) continue;
+
+          try {
+            const outputBuffer = await sharp(fileData)
+              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+              .webp({ quality: 75 })
+              .toBuffer();
+
+            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
+              const newRespName = resp.replace(/\.[^.]+$/, '.webp');
+              const newStoragePath = `${responsesFolder}/${newRespName}`;
+              await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+              report.repaired.push(`responses/${resp} → ${newRespName}`);
+              if (newRespName !== resp) {
                 try {
                   await supabase.storage.from('uploads').remove([respStoragePath]);
                 } catch {}
-                report.removed.push(`responses/${resp}`);
               }
-            } catch {
+            } else {
               try {
                 await supabase.storage.from('uploads').remove([respStoragePath]);
               } catch {}
               report.removed.push(`responses/${resp}`);
-            } finally {
-              await unlink(tmpIn).catch(() => {});
-              await unlink(tmpOut).catch(() => {});
             }
-          } catch (err) {
-            console.error(`Error downloading response ${resp}:`, err);
+          } catch {
+            try {
+              await supabase.storage.from('uploads').remove([respStoragePath]);
+            } catch {}
+            report.removed.push(`responses/${resp}`);
           }
+        } catch (err) {
+          console.error(`Error downloading response ${resp}:`, err);
         }
-      } catch {}
+      }
+    } catch {}
 
-      // Cleanup temp
-      try {
-        await rm(tempDir, { recursive: true, force: true });
-      } catch {}
+    // Audio MP3 - vérifier mais ne pas réparer (ffmpeg non disponible sur Vercel)
+    const audioFolder = `${storagePrefix}/audio`;
+    try {
+      const audios = await listFiles(audioFolder);
+      for (const audio of audios) {
+        if (!audio.toLowerCase().endsWith('.mp3')) continue;
 
-      return NextResponse.json({
-        success: true,
-        report,
-        summary: {
-          totalRepaired: report.repaired.length,
-          totalRemoved: report.removed.length,
+        const audioStoragePath = `${audioFolder}/${audio}`;
+        try {
+          const fileData = await downloadFile(audioStoragePath);
+          if (isValidMp3(fileData)) continue;
+
+          // Can't repair without ffmpeg - just report
+          report.errors.push(`audio/${audio} — corrompu (ffmpeg non disponible sur serveur)`);
+        } catch (err) {
+          console.error(`Error downloading audio ${audio}:`, err);
         }
-      });
-    } catch (error) {
-      try {
-        await rm(tempDir, { recursive: true, force: true });
-      } catch {}
-      throw error;
-    }
+      }
+    } catch {}
+
+    // Vidéo MP4 - vérifier mais ne pas réparer (ffmpeg non disponible sur Vercel)
+    const videoFolder = `${storagePrefix}/video`;
+    try {
+      const videos = await listFiles(videoFolder);
+      for (const video of videos) {
+        if (!video.toLowerCase().endsWith('.mp4')) continue;
+
+        const videoStoragePath = `${videoFolder}/${video}`;
+        try {
+          const fileData = await downloadFile(videoStoragePath);
+          if (isValidMp4(fileData)) continue;
+
+          // Can't repair without ffmpeg - just report
+          report.errors.push(`video/${video} — corrompu (ffmpeg non disponible sur serveur)`);
+        } catch (err) {
+          console.error(`Error downloading video ${video}:`, err);
+        }
+      }
+    } catch {}
+
+    return NextResponse.json({
+      success: true,
+      report,
+      summary: {
+        totalRepaired: report.repaired.length,
+        totalRemoved: report.removed.length,
+      }
+    });
   } catch (error) {
     console.error('Series repair error:', error);
     return NextResponse.json({ error: 'Réparation échouée: ' + (error as Error).message }, { status: 500 });
   }
-}
-
-// === Réparation Audio MP3 ===
-async function tryRepairAudio(fileData: Buffer, baseName: string, tempDir: string): Promise<Buffer | null> {
-  const tmpIn = path.join(tempDir, `repair_audio_in_${baseName}`);
-  const tmpOut = path.join(tempDir, `repair_audio_out_${baseName}`);
-
-  try {
-    await writeFile(tmpIn, fileData);
-
-    // Strategy 1: Re-encode with error tolerance
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputOptions('-err_detect', 'ignore_err')
-          .inputOptions('-fflags', '+genpts+discardcorrupt')
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .output(tmpOut)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      const result = await readFile(tmpOut);
-      if (result.length > 100) {
-        await cleanupFiles(tmpIn, tmpOut);
-        return result;
-      }
-    } catch {}
-
-    // Strategy 2: Force mp3 format
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputFormat('mp3')
-          .inputOptions('-err_detect', 'ignore_err')
-          .noVideo()
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .audioFrequency(22050)
-          .output(tmpOut)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      const result = await readFile(tmpOut);
-      if (result.length > 100) {
-        await cleanupFiles(tmpIn, tmpOut);
-        return result;
-      }
-    } catch {}
-
-    // Strategy 3: WAV intermédiaire
-    const tmpWav = path.join(tempDir, `repair_audio_wav_${Date.now()}.wav`);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputOptions('-err_detect', 'ignore_err')
-          .noVideo()
-          .audioCodec('pcm_s16le')
-          .audioFrequency(22050)
-          .audioChannels(1)
-          .output(tmpWav)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpWav)
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .audioFrequency(22050)
-          .output(tmpOut)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      await unlink(tmpWav).catch(() => {});
-      const result = await readFile(tmpOut);
-      if (result.length > 100) {
-        await cleanupFiles(tmpIn, tmpOut, tmpWav);
-        return result;
-      }
-    } catch {
-      await unlink(tmpWav).catch(() => {});
-    }
-
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  } catch {
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  }
-}
-
-// === Réparation Vidéo MP4 ===
-async function tryRepairVideo(fileData: Buffer, baseName: string, tempDir: string): Promise<Buffer | null> {
-  const tmpIn = path.join(tempDir, `repair_video_in_${baseName}`);
-  const tmpOut = path.join(tempDir, `repair_video_out_${baseName}`);
-
-  try {
-    await writeFile(tmpIn, fileData);
-
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(tmpIn)
-        .inputOptions('-err_detect', 'ignore_err')
-        .videoCodec('libx264')
-        .addOutputOptions('-preset', 'fast', '-crf', '28')
-        .size('854x480')
-        .audioCodec('aac')
-        .audioBitrate('64k')
-        .output(tmpOut)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
-
-    const result = await readFile(tmpOut);
-    if (result.length > 1000) {
-      await cleanupFiles(tmpIn, tmpOut);
-      return result;
-    }
-
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  } catch {
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  }
-}
-
-async function cleanupFiles(...files: string[]) {
-  for (const f of files) await unlink(f).catch(() => {});
 }
 
 function isValidImage(data: Buffer): boolean {

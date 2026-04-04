@@ -1,25 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mkdir, unlink, readFile, writeFile, rm } from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import ffmpeg from 'fluent-ffmpeg';
 import AdmZip from 'adm-zip';
-import os from 'os';
+import { getUploadBuffer, getUploadJob, saveUploadJob, hasUploadJob } from '@/lib/upload-store';
 
-// POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP temporaire
+// POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP
+// Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const importId = body.importId;
     const zipBufferBase64 = body.zipBuffer;
 
-    if (!importId || !zipBufferBase64) {
+    if (!importId && !zipBufferBase64) {
       return NextResponse.json({ error: 'Missing importId or zipBuffer' }, { status: 400 });
     }
 
-    const zipBuffer = Buffer.from(zipBufferBase64, 'base64');
-    const tempExtractDir = path.join(os.tmpdir(), `repair_${importId}`);
-    await mkdir(tempExtractDir, { recursive: true });
+    let zipBuffer: Buffer;
+
+    if (zipBufferBase64) {
+      // Direct buffer provided (backward compatibility)
+      zipBuffer = Buffer.from(zipBufferBase64, 'base64');
+    } else {
+      // Load from Supabase temp storage
+      const jobExists = await hasUploadJob(importId);
+      if (!jobExists) {
+        return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
+      }
+      const buffer = await getUploadBuffer(importId);
+      if (!buffer) {
+        return NextResponse.json({ error: 'Fichier introuvable' }, { status: 400 });
+      }
+      zipBuffer = buffer;
+    }
 
     try {
       const zip = new AdmZip(zipBuffer);
@@ -57,68 +70,50 @@ export async function POST(request: NextRequest) {
         const dirName = entryName.substring(0, entryName.length - baseName.length);
         let fileData = entry.getData();
 
-        // ===== REPAIR IMAGES =====
+        // ===== REPAIR IMAGES (sharp with Buffers - no filesystem needed!) =====
         if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif'].includes(ext)) {
           if (isValidImage(fileData)) {
             newZip.addFile(entry.entryName, fileData);
             continue;
           }
 
-          const tmpIn = path.join(tempExtractDir, `repair_in_${baseName}`);
-          const tmpOut = path.join(tempExtractDir, `repair_out_${baseName.replace(/\.[^.]+$/, '.webp')}`);
+          // Try to repair with sharp
           try {
-            await writeFile(tmpIn, fileData);
-            await sharp(tmpIn)
+            const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
               .webp({ quality: 75 })
-              .toFile(tmpOut);
-            const outData = await readFile(tmpOut);
-            if (outData.length > 0 && isValidImage(outData)) {
+              .toBuffer();
+
+            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
               const newBaseName = baseName.replace(/\.[^.]+$/, '.webp');
-              newZip.addFile(stripParent + dirName + newBaseName, outData);
+              newZip.addFile(stripParent + dirName + newBaseName, outputBuffer);
               report.repaired.push(`${baseName} → Image réparée`);
             } else {
               report.removed.push(`${baseName} — Image irréparable`);
             }
           } catch {
             report.removed.push(`${baseName} — Image irréparable`);
-          } finally {
-            await unlink(tmpIn).catch(() => {});
-            await unlink(tmpOut).catch(() => {});
           }
           continue;
         }
 
-        // ===== REPAIR AUDIO MP3 =====
+        // ===== AUDIO MP3 - keep as-is (ffmpeg not available on Vercel) =====
         if (ext === '.mp3') {
           if (isValidMp3(fileData)) {
             newZip.addFile(entry.entryName, fileData);
-            continue;
-          }
-
-          const repaired = await tryRepairAudio(fileData, baseName, tempExtractDir);
-          if (repaired && repaired.length > 0 && isValidMp3(repaired)) {
-            newZip.addFile(stripParent + dirName + baseName, repaired);
-            report.repaired.push(`${baseName} — Audio réparé avec ffmpeg`);
           } else {
-            report.removed.push(`${baseName} — Audio irréparable`);
+            // Can't repair without ffmpeg - remove corrupted files
+            report.removed.push(`${baseName} — Audio corrompu (ffmpeg non disponible)`);
           }
           continue;
         }
 
-        // ===== REPAIR VIDEO MP4 =====
+        // ===== VIDEO MP4 - keep as-is (ffmpeg not available on Vercel) =====
         if (ext === '.mp4') {
           if (isValidMp4(fileData)) {
             newZip.addFile(entry.entryName, fileData);
-            continue;
-          }
-
-          const repaired = await tryRepairVideo(fileData, baseName, tempExtractDir);
-          if (repaired && repaired.length > 0 && isValidMp4(repaired)) {
-            newZip.addFile(stripParent + dirName + baseName, repaired);
-            report.repaired.push(`${baseName} — Vidéo réparée avec ffmpeg`);
           } else {
-            report.removed.push(`${baseName} — Vidéo irréparable`);
+            report.removed.push(`${baseName} — Vidéo corrompue (ffmpeg non disponible)`);
           }
           continue;
         }
@@ -127,13 +122,20 @@ export async function POST(request: NextRequest) {
         newZip.addFile(entry.entryName, fileData);
       }
 
-      // Return the repaired ZIP as base64 (no filesystem storage needed)
+      // Create repaired ZIP buffer
       const repairedBuffer = newZip.toBuffer();
 
-      // Cleanup temp
-      try {
-        await rm(tempExtractDir, { recursive: true, force: true });
-      } catch {}
+      // Save repaired ZIP back to Supabase temp storage (replace original)
+      if (importId && !zipBufferBase64) {
+        const job = await getUploadJob(importId);
+        if (job) {
+          try {
+            await saveUploadJob(importId, repairedBuffer, job);
+          } catch {
+            console.error('Failed to save repaired ZIP to temp storage');
+          }
+        }
+      }
 
       return NextResponse.json({
         success: true,
@@ -145,163 +147,11 @@ export async function POST(request: NextRequest) {
         zipBuffer: repairedBuffer.toString('base64'),
       });
     } catch (error) {
-      try {
-        await rm(tempExtractDir, { recursive: true, force: true });
-      } catch {}
       throw error;
     }
   } catch (error) {
     console.error('Repair error:', error);
     return NextResponse.json({ error: 'Réparation échouée: ' + (error as Error).message }, { status: 500 });
-  }
-}
-
-// === Multiple strategies to repair corrupted MP3 ===
-async function tryRepairAudio(fileData: Buffer, baseName: string, tempDir: string): Promise<Buffer | null> {
-  const tmpIn = path.join(tempDir, `repair_audio_in_${baseName}`);
-  const tmpOut = path.join(tempDir, `repair_audio_out_${baseName}`);
-
-  try {
-    await writeFile(tmpIn, fileData);
-
-    // Strategy 1: Re-encode with input error tolerance flags
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputOptions('-err_detect', 'ignore_err')
-          .inputOptions('-fflags', '+genpts+discardcorrupt')
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .output(tmpOut)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      const result = await readFile(tmpOut);
-      if (result.length > 100) {
-        await cleanupFiles(tmpIn, tmpOut);
-        return result;
-      }
-    } catch {
-      // Strategy 1 failed
-    }
-
-    // Strategy 2: Force treat input as mp3 with error tolerance
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputFormat('mp3')
-          .inputOptions('-err_detect', 'ignore_err')
-          .noVideo()
-          .audioCodec('libmp3lame')
-          .audioBitrate('64k')
-          .audioChannels(1)
-          .audioFrequency(22050)
-          .output(tmpOut)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-      const result = await readFile(tmpOut);
-      if (result.length > 100) {
-        await cleanupFiles(tmpIn, tmpOut);
-        return result;
-      }
-    } catch {
-      // Strategy 2 failed
-    }
-
-    // Strategy 3: Decode to WAV PCM first, then re-encode to MP3
-    const tmpWav = path.join(tempDir, `repair_audio_wav_${Date.now()}.wav`);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(tmpIn)
-          .inputOptions('-err_detect', 'ignore_err')
-          .noVideo()
-          .audioCodec('pcm_s16le')
-          .audioFrequency(22050)
-          .audioChannels(1)
-          .output(tmpWav)
-          .on('end', resolve)
-          .on('error', reject)
-          .run();
-      });
-
-      try {
-        await new Promise<void>((resolve, reject) => {
-          ffmpeg(tmpWav)
-            .audioCodec('libmp3lame')
-            .audioBitrate('64k')
-            .audioChannels(1)
-            .audioFrequency(22050)
-            .output(tmpOut)
-            .on('end', resolve)
-            .on('error', reject)
-            .run();
-        });
-
-        await unlink(tmpWav).catch(() => {});
-
-        const result = await readFile(tmpOut);
-        if (result.length > 100) {
-          await cleanupFiles(tmpIn, tmpOut, tmpWav);
-          return result;
-        }
-      } catch {
-        await unlink(tmpWav).catch(() => {});
-      }
-    } catch {
-      await unlink(tmpWav).catch(() => {});
-    }
-
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  } catch {
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  }
-}
-
-// Try to repair corrupted MP4
-async function tryRepairVideo(fileData: Buffer, baseName: string, tempDir: string): Promise<Buffer | null> {
-  const tmpIn = path.join(tempDir, `repair_video_in_${baseName}`);
-  const tmpOut = path.join(tempDir, `repair_video_out_${baseName}`);
-
-  try {
-    await writeFile(tmpIn, fileData);
-
-    await new Promise<void>((resolve, reject) => {
-      ffmpeg(tmpIn)
-        .inputOptions('-err_detect', 'ignore_err')
-        .videoCodec('libx264')
-        .addOutputOptions('-preset', 'fast', '-crf', '28')
-        .size('854x480')
-        .audioCodec('aac')
-        .audioBitrate('64k')
-        .output(tmpOut)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
-    });
-
-    const result = await readFile(tmpOut);
-    if (result.length > 1000) {
-      await cleanupFiles(tmpIn, tmpOut);
-      return result;
-    }
-
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  } catch {
-    await cleanupFiles(tmpIn, tmpOut);
-    return null;
-  }
-}
-
-async function cleanupFiles(...files: string[]) {
-  for (const f of files) {
-    await unlink(f).catch(() => {});
   }
 }
 

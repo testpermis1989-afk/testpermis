@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync } from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { db } from '@/lib/db';
 import { randomUUID } from 'crypto';
 import { uploadFile, getPublicUrl } from '@/lib/supabase';
-import os from 'os';
-import { writeFile, mkdir, unlink, rm } from 'fs/promises';
-
-// Store upload jobs in memory - buffer instead of temp file path
-const uploadJobs = new Map<string, { zipBuffer: Buffer; categoryCode: string; serieNumber: string; fileName: string; fileSize: string; verified: boolean }>();
+import { saveUploadJob, getUploadBuffer, getUploadJob, deleteUploadJob, hasUploadJob } from '@/lib/upload-store';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -51,23 +46,31 @@ export async function POST(request: NextRequest) {
     }
 
     // MODE 2: Import from already uploaded file (no re-upload!)
-    if (importId && uploadJobs.has(importId)) {
-      const job = uploadJobs.get(importId)!;
+    if (importId) {
+      const jobExists = await hasUploadJob(importId);
+      if (jobExists) {
+        const zipBuffer = await getUploadBuffer(importId);
+        const job = await getUploadJob(importId);
 
-      try {
-        // Verify from buffer
-        const verification = verifyZipBuffer(job.zipBuffer);
-        if (!verification.isValid) {
-          uploadJobs.delete(importId);
-          return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
+        if (!zipBuffer || !job) {
+          await deleteUploadJob(importId);
+          return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
         }
 
-        const result = await extractAndImport(job.zipBuffer, job.categoryCode, parseInt(job.serieNumber));
-        uploadJobs.delete(importId);
-        return NextResponse.json({ success: true, ...result });
-      } catch (error) {
-        uploadJobs.delete(importId);
-        return NextResponse.json({ error: 'Import failed: ' + (error as Error).message }, { status: 500 });
+        try {
+          const verification = verifyZipBuffer(zipBuffer);
+          if (!verification.isValid) {
+            await deleteUploadJob(importId);
+            return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
+          }
+
+          const result = await extractAndImport(zipBuffer, job.categoryCode, parseInt(job.serieNumber));
+          await deleteUploadJob(importId);
+          return NextResponse.json({ success: true, ...result });
+        } catch (error) {
+          await deleteUploadJob(importId);
+          return NextResponse.json({ error: 'Import failed: ' + (error as Error).message }, { status: 500 });
+        }
       }
     }
 
@@ -106,20 +109,25 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Keep buffer in memory for later import (no re-upload needed!)
-    uploadJobs.set(jobId, {
-      zipBuffer: buffer,
-      categoryCode,
-      serieNumber,
-      fileName: file.name,
-      fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-      verified: verification.isValid,
-    });
-
-    // Auto-cleanup after 10 minutes
-    setTimeout(() => {
-      uploadJobs.delete(jobId);
-    }, 10 * 60 * 1000);
+    // Store buffer in Supabase temp storage (persists between serverless invocations)
+    try {
+      await saveUploadJob(jobId, buffer, {
+        categoryCode,
+        serieNumber,
+        fileName: file.name,
+        fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+        verified: verification.isValid,
+        createdAt: Date.now(),
+      });
+    } catch (saveErr) {
+      console.error('Failed to save temp upload:', saveErr);
+      // Fallback: proceed with direct import if temp storage fails
+      if (verification.isValid) {
+        const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
+        return NextResponse.json({ success: true, ...result });
+      }
+      return NextResponse.json({ error: 'Erreur de stockage temporaire' }, { status: 500 });
+    }
 
     if (verifyOnly) {
       return NextResponse.json({
@@ -134,12 +142,12 @@ export async function POST(request: NextRequest) {
 
     // Direct import (no verification step)
     if (!verification.isValid) {
-      uploadJobs.delete(jobId);
+      await deleteUploadJob(jobId);
       return NextResponse.json({ success: false, error: 'La vérification a échoué', verification }, { status: 400 });
     }
 
     const result = await extractAndImport(buffer, categoryCode, parseInt(serieNumber));
-    uploadJobs.delete(jobId);
+    await deleteUploadJob(jobId);
     return NextResponse.json({ success: true, ...result });
 
   } catch (error) {

@@ -2926,16 +2926,11 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     }
   };
 
-  // Confirm import after verification (pas de re-upload! utilise importId)
-  const handleConfirmImport = async () => {
+  // Direct import using importId (bypasses state - used for auto-import after verification)
+  const handleImport = async (importIdToUse: string) => {
     setShowVerificationModal(false);
     setCompressBeforeImport(null);
-
-    if (!pendingImportId) {
-      setMediaResult({ success: false, message: '❌ Erreur: fichier expiré, veuillez ré-uploader' });
-      return;
-    }
-
+    setPendingImportId(importIdToUse);
     setUploadingMedia(true);
     setMediaResult(null);
 
@@ -2943,12 +2938,11 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000);
 
-      // Utilise importId → le serveur utilise le fichier déjà uploadé, PAS de re-upload!
       const res = await fetch('/api/upload/rar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          importId: pendingImportId,
+          importId: importIdToUse,
           category,
           serie: serie.toString(),
         }),
@@ -2993,11 +2987,25 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         success: false,
         message: isTimeout
           ? '❌ Timeout - le traitement a pris trop longtemps'
-          : `❌ Erreur: ${errorMessage}`
+          : `❌ Erreur de connexion: ${errorMessage}`
       });
     } finally {
       setUploadingMedia(false);
     }
+  };
+
+  // Confirm import after verification (pas de re-upload! utilise importId)
+  const handleConfirmImport = async () => {
+    setShowVerificationModal(false);
+    setCompressBeforeImport(null);
+
+    if (!pendingImportId) {
+      setMediaResult({ success: false, message: '❌ Erreur: fichier expiré, veuillez ré-uploader' });
+      return;
+    }
+
+    // Delegate to handleImport with the pending ID
+    await handleImport(pendingImportId);
   };
 
   // Cancel verification

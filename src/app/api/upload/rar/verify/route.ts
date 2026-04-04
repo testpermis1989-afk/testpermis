@@ -1,30 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import AdmZip from 'adm-zip';
+import { getUploadBuffer, hasUploadJob } from '@/lib/upload-store';
 
-// POST /api/upload/rar/verify - Re-vérify un ZIP temporaire (après réparation)
+// POST /api/upload/rar/verify - Re-vérify un ZIP (après réparation)
+// Loads ZIP buffer from Supabase temp storage via importId
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const importId = body.importId;
-
-    if (!importId) {
-      return NextResponse.json({ error: 'Missing importId' }, { status: 400 });
-    }
-
-    // The uploadJobs map is shared via the parent module (upload/rar/route.ts)
-    // Since we can't directly import the in-memory map from another route module,
-    // we need to find the job from the in-memory store.
-    // For verification only (after repair), the repaired ZIP buffer should be passed
-    // or we need to find it in the shared state.
-    
-    // This route now expects a base64-encoded ZIP buffer in the request body
     const zipBufferBase64 = body.zipBuffer;
-    if (!zipBufferBase64) {
-      return NextResponse.json({ error: 'Missing zipBuffer (base64)' }, { status: 400 });
+
+    if (!importId && !zipBufferBase64) {
+      return NextResponse.json({ error: 'Missing importId or zipBuffer' }, { status: 400 });
     }
 
-    const zipBuffer = Buffer.from(zipBufferBase64, 'base64');
+    let zipBuffer: Buffer;
+
+    if (zipBufferBase64) {
+      // Direct buffer provided (backward compatibility)
+      zipBuffer = Buffer.from(zipBufferBase64, 'base64');
+    } else {
+      // Load from Supabase temp storage
+      const jobExists = await hasUploadJob(importId);
+      if (!jobExists) {
+        return NextResponse.json({ error: 'Fichier expiré, veuillez ré-uploader' }, { status: 400 });
+      }
+      const buffer = await getUploadBuffer(importId);
+      if (!buffer) {
+        return NextResponse.json({ error: 'Fichier introuvable' }, { status: 400 });
+      }
+      zipBuffer = buffer;
+    }
+
     const verification = verifyZipBuffer(zipBuffer);
     return NextResponse.json({ success: true, verification });
   } catch (error) {
