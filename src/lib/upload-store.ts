@@ -122,6 +122,23 @@ export async function deleteUploadJob(importId: string): Promise<void> {
   return deleteSupabaseUploadJob(importId);
 }
 
+export async function getUploadJob(importId: string): Promise<UploadJob | null> {
+  if (STORAGE_MODE === 'local') {
+    const metaPath = path.join(LOCAL_TEMP_DIR, `${importId}.json`);
+    if (!fs.existsSync(metaPath)) return null;
+    const content = fs.readFileSync(metaPath, 'utf-8');
+    return JSON.parse(content) as UploadJob;
+  }
+  // Supabase mode
+  const { supabase } = await import('./supabase');
+  const { data, error } = await supabase.storage
+    .from('uploads')
+    .download(`temp-uploads/${importId}.json`);
+  if (error || !data) return null;
+  const content = await data.text();
+  return JSON.parse(content) as UploadJob;
+}
+
 export async function hasUploadJob(importId: string): Promise<boolean> {
   if (STORAGE_MODE === 'local') {
     return hasLocalUploadJob(importId);
