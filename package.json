@@ -99,6 +99,7 @@
   },
   "build": {
     "npmRebuild": false,
+    "asar": false,
     "appId": "com.permis.maroc",
     "productName": "Permis Maroc",
     "copyright": "Copyright © 2025 Permis Maroc",
