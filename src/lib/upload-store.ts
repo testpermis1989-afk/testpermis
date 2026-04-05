@@ -1,6 +1,6 @@
 // Upload store - supports both Supabase (cloud) and local filesystem (Electron) modes
-import fs from 'fs';
-import path from 'path';
+// Cloud mode: stores temp uploads in Supabase Storage
+// Local mode: stores temp uploads on local filesystem
 
 const STORAGE_MODE = (process.env.STORAGE_MODE || 'supabase') as 'supabase' | 'local';
 
@@ -15,38 +15,53 @@ interface UploadJob {
 
 // ========== LOCAL STORAGE (Electron mode) ==========
 
-const LOCAL_DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
-const LOCAL_TEMP_DIR = path.join(LOCAL_DATA_DIR, 'temp-uploads');
+const LOCAL_DATA_DIR = process.env.LOCAL_DATA_DIR || 'data';
 
-function ensureLocalDir(): void {
-  if (!fs.existsSync(LOCAL_TEMP_DIR)) {
-    fs.mkdirSync(LOCAL_TEMP_DIR, { recursive: true });
+async function getLocalTempDir(): Promise<string> {
+  const path = await import('path');
+  return path.join(LOCAL_DATA_DIR, 'temp-uploads');
+}
+
+async function ensureLocalDir(): Promise<void> {
+  const fs = await import('fs');
+  const path = await import('path');
+  const dir = await getLocalTempDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
 async function saveLocalUploadJob(importId: string, zipBuffer: Buffer, metadata: UploadJob): Promise<void> {
+  const fs = await import('fs');
+  const path = await import('path');
   ensureLocalDir();
-  fs.writeFileSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`), zipBuffer);
-  fs.writeFileSync(path.join(LOCAL_TEMP_DIR, `${importId}.json`), JSON.stringify(metadata));
+  const dir = await getLocalTempDir();
+  fs.writeFileSync(path.join(dir, `${importId}.zip`), zipBuffer);
+  fs.writeFileSync(path.join(dir, `${importId}.json`), JSON.stringify(metadata));
 }
 
 async function getLocalUploadBuffer(importId: string): Promise<Buffer | null> {
-  const fullPath = path.join(LOCAL_TEMP_DIR, `${importId}.zip`);
+  const fs = await import('fs');
+  const path = await import('path');
+  const dir = await getLocalTempDir();
+  const fullPath = path.join(dir, `${importId}.zip`);
   if (!fs.existsSync(fullPath)) return null;
   return fs.readFileSync(fullPath);
 }
 
 async function deleteLocalUploadJob(importId: string): Promise<void> {
-  try {
-    fs.unlinkSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`));
-  } catch {}
-  try {
-    fs.unlinkSync(path.join(LOCAL_TEMP_DIR, `${importId}.json`));
-  } catch {}
+  const fs = await import('fs');
+  const path = await import('path');
+  const dir = await getLocalTempDir();
+  try { fs.unlinkSync(path.join(dir, `${importId}.zip`)); } catch {}
+  try { fs.unlinkSync(path.join(dir, `${importId}.json`)); } catch {}
 }
 
 async function hasLocalUploadJob(importId: string): Promise<boolean> {
-  return fs.existsSync(path.join(LOCAL_TEMP_DIR, `${importId}.zip`));
+  const fs = await import('fs');
+  const path = await import('path');
+  const dir = await getLocalTempDir();
+  return fs.existsSync(path.join(dir, `${importId}.zip`));
 }
 
 // ========== SUPABASE STORAGE (cloud mode) ==========
@@ -124,7 +139,10 @@ export async function deleteUploadJob(importId: string): Promise<void> {
 
 export async function getUploadJob(importId: string): Promise<UploadJob | null> {
   if (STORAGE_MODE === 'local') {
-    const metaPath = path.join(LOCAL_TEMP_DIR, `${importId}.json`);
+    const fs = await import('fs');
+    const path = await import('path');
+    const dir = await getLocalTempDir();
+    const metaPath = path.join(dir, `${importId}.json`);
     if (!fs.existsSync(metaPath)) return null;
     const content = fs.readFileSync(metaPath, 'utf-8');
     return JSON.parse(content) as UploadJob;
