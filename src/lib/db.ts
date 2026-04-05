@@ -31,39 +31,32 @@ function isLocalMode(): boolean {
   return STORAGE_MODE === 'local' || !!(process.env.DATABASE_URL || '').includes('file:');
 }
 
-// Create a proxy that delegates to the right database
-// Supports: db.user.findUnique(...), db.category.findMany(...), etc.
+// Create a db proxy that works for both modes
+// Cloud mode: direct pass-through to Prisma (no overhead)
+// Local mode: wraps local-db async methods
 function createDbProxy(): any {
   return new Proxy({} as any, {
     get(_target, prop) {
-      // Return a nested proxy for each model (user, category, serie, etc.)
+      // Cloud/Supabase mode: return Prisma model directly (zero overhead)
+      if (!isLocalMode()) {
+        return (getPrisma() as any)[String(prop)];
+      }
+
+      // Local mode: return a proxy that wraps local db methods
       return new Proxy({} as any, {
         get(_modelTarget, method) {
-          // Return an async function for each method call
           return async (...args: any[]) => {
-            if (isLocalMode()) {
-              const local = await getLocalDb();
-              const model = (local as any)[String(prop)];
-              if (model && model[String(method)]) {
-                const result = model[String(method)](...args);
-                // Await if the method returns a Promise
-                if (result && typeof result === 'object' && typeof result.then === 'function') {
-                  return await result;
-                }
-                return result;
-              }
-              throw new Error(`Method "${String(prop)}.${String(method)}" not found in local DB`);
+            const local = await getLocalDb();
+            const model = (local as any)[String(prop)];
+            if (!model) throw new Error(`Model "${String(prop)}" not found in local DB`);
+            const fn = model[String(method)];
+            if (!fn) throw new Error(`Method "${String(prop)}.${String(method)}" not found in local DB`);
+            const result = fn(...args);
+            // Await if the method returns a Promise (all local methods are async)
+            if (result && typeof result === 'object' && typeof result.then === 'function') {
+              return await result;
             }
-            const prisma = getPrisma();
-            const prismaModel = (prisma as any)[String(prop)];
-            if (!prismaModel) {
-              throw new Error(`Model "${String(prop)}" not found in Prisma`);
-            }
-            const prismaMethod = prismaModel[String(method)];
-            if (!prismaMethod) {
-              throw new Error(`Method "${String(prop)}.${String(method)}" not found in Prisma`);
-            }
-            return prismaMethod(...args);
+            return result;
           };
         }
       });
