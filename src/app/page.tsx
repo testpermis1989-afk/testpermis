@@ -2819,26 +2819,44 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setVerificationResult(null);
 
     try {
-      // Step 1: Upload ZIP directly to Supabase Storage (from browser) - avoids Vercel 4.5MB limit
-      const { uploadZipToStorage } = await import('@/lib/client-upload');
-      const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
+      // Step 1: Upload ZIP
+      const isDesktop = window.electronAPI?.isDesktop?.() || process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
 
-      if (uploadError) {
-        setMediaResult({ success: false, message: `❌ Erreur d'upload: ${uploadError}` });
-        setVerifying(false);
-        return;
-      }
-
-      // Step 2: Tell server to verify from Supabase Storage
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
 
-      const res = await fetch('/api/upload/rar/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ importId }),
-        signal: controller.signal,
-      });
+      let res: Response;
+
+      if (isDesktop) {
+        // Desktop mode: send ZIP as FormData directly (no cloud storage)
+        setMediaResult({ success: false, message: '📤 Verification en cours...' });
+        const formData = new FormData();
+        formData.append('file', mediaFile);
+        formData.append('category', category);
+        formData.append('serie', serie.toString());
+        formData.append('verifyOnly', 'true');
+        res = await fetch('/api/upload/rar', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+      } else {
+        // Cloud mode: upload to Supabase first, then verify
+        const { uploadZipToStorage } = await import('@/lib/client-upload');
+        const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
+        if (uploadError) {
+          setMediaResult({ success: false, message: `❌ Erreur d'upload: ${uploadError}` });
+          setVerifying(false);
+          clearTimeout(timeoutId);
+          return;
+        }
+        res = await fetch('/api/upload/rar/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ importId }),
+          signal: controller.signal,
+        });
+      }
       clearTimeout(timeoutId);
 
       // Vérifier que la réponse est du JSON (pas HTML)
@@ -2870,10 +2888,48 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         loadSeriesData();
         setActiveTab('series');
       } else if (data.verification) {
-        // Verification result - save importId and show modal
-        if (importId) setPendingImportId(importId);
-        setVerificationResult(data.verification);
-        setShowVerificationModal(true);
+        // Verification result
+        if (isDesktop) {
+          // Desktop mode: auto-import immediately after verification (no temp storage)
+          if (data.verification.isValid) {
+            setMediaResult({ success: false, message: '📥 Importation en cours...' });
+            const importForm = new FormData();
+            importForm.append('file', mediaFile);
+            importForm.append('category', category);
+            importForm.append('serie', serie.toString());
+            const importRes = await fetch('/api/upload/rar', {
+              method: 'POST',
+              body: importForm,
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            const importData = await importRes.json();
+            if (importData.success) {
+              const ext = importData.extracted;
+              const details = ext ? [
+                `📷 Images: ${ext.images}`,
+                `🎵 Audio MP3: ${ext.audio}`,
+                `🎬 Vidéo MP4: ${ext.video}`,
+                `🖼️ Réponses: ${ext.responses}`,
+                `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
+                `📝 Questions importées: ${importData.questionsImported || 0}`
+              ].join('\n') : '';
+              setMediaResult({ success: true, message: `✅ ${importData.message}\n\n${details}` });
+              loadSeriesData();
+              setActiveTab('series');
+            } else {
+              setMediaResult({ success: false, message: `❌ Erreur d'import: ${importData.error}` });
+            }
+          } else {
+            setVerificationResult(data.verification);
+            setShowVerificationModal(true);
+          }
+        } else {
+          // Cloud mode: save importId and show modal
+          if (importId) setPendingImportId(importId);
+          setVerificationResult(data.verification);
+          setShowVerificationModal(true);
+        }
       } else if (data.error) {
         let errorMsg = '❌ Erreur:\n\n';
         errorMsg += `• ${data.error}\n`;
@@ -2946,8 +3002,15 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     }
   };
 
-  // Direct import using importId (bypasses state - used for auto-import after verification)
+  // Direct import using importId (cloud mode only)
   const handleImport = async (importIdToUse: string) => {
+    // In desktop mode, this function shouldn't be called (auto-import handles it)
+    const isDesktop = window.electronAPI?.isDesktop?.() || process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
+    if (isDesktop) {
+      setMediaResult({ success: false, message: '❌ Erreur: mode desktop - ré-uploadez le fichier' });
+      setUploadingMedia(false);
+      return;
+    }
     setShowVerificationModal(false);
     setCompressBeforeImport(null);
     setPendingImportId(importIdToUse);
@@ -3054,33 +3117,45 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     setPendingImportId(null);
 
     try {
-      // Step 1: Upload ZIP directly to Supabase Storage (from browser)
-      setMediaResult({ success: false, message: '📤 Upload vers le stockage en cours...' });
+      // Step 1: Upload ZIP
+      const isDesktop = window.electronAPI?.isDesktop?.() || process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
 
-      const { uploadZipToStorage } = await import('@/lib/client-upload');
-      const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
-
-      if (uploadError) {
-        setMediaResult({ success: false, message: `❌ ${uploadError}` });
-        return;
-      }
-
-      // Step 2: Tell server to import from Supabase Storage
-      setMediaResult({ success: false, message: '📥 Importation depuis le stockage...' });
+      setMediaResult({ success: false, message: '📤 Upload en cours...' });
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 min
 
-      const res = await fetch('/api/upload/rar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          importId,
-          category,
-          serie: serie.toString(),
-        }),
-        signal: controller.signal,
-      });
+      let res: Response;
+
+      if (isDesktop) {
+        // Desktop mode: send ZIP as FormData directly
+        setMediaResult({ success: false, message: '📥 Importation en cours...' });
+        const formData = new FormData();
+        formData.append('file', mediaFile);
+        formData.append('category', category);
+        formData.append('serie', serie.toString());
+        res = await fetch('/api/upload/rar', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+      } else {
+        // Cloud mode: upload to Supabase first
+        const { uploadZipToStorage } = await import('@/lib/client-upload');
+        const { importId, error: uploadError } = await uploadZipToStorage(mediaFile, category, serie.toString());
+        if (uploadError) {
+          setMediaResult({ success: false, message: `❌ ${uploadError}` });
+          clearTimeout(timeoutId);
+          return;
+        }
+        setMediaResult({ success: false, message: '📥 Importation depuis le stockage...' });
+        res = await fetch('/api/upload/rar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ importId, category, serie: serie.toString() }),
+          signal: controller.signal,
+        });
+      }
       clearTimeout(timeoutId);
 
       const contentType = res.headers.get('content-type') || '';
