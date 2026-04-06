@@ -18,9 +18,9 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [2/4] next build...
+echo [2/4] next build (no turbopack for standalone)...
 set NEXT_PUBLIC_STORAGE_MODE=local
-call npx next build
+call npx next build --no-turbopack
 if %errorlevel% neq 0 (
     echo ERROR: next build failed!
     pause
@@ -31,6 +31,12 @@ echo.
 
 echo [3/4] copy-build...
 call node scripts/copy-build.js
+if %errorlevel% neq 0 (
+    echo ERROR: copy-build failed! server.js not found!
+    echo Make sure next.config.ts has output: "standalone"
+    pause
+    exit /b 1
+)
 echo OK
 echo.
 
