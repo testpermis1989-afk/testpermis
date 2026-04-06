@@ -108,7 +108,14 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo.
-echo  ✅ Compilation terminée!
+echo  ✅ Compilation Next.js terminée!
+
+echo  ⏳ Copie des fichiers statiques...
+call node scripts/copy-build.js 2>nul
+if %errorlevel% neq 0 (
+    echo  ⚠️  Avertissement: copie des fichiers (non critique)
+)
+echo  ✅ Fichiers statiques copiés!
 echo.
 
 :: ============================================================
