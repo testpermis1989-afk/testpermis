@@ -12,7 +12,7 @@ function getDbPath(): string {
   const dbUrl = process.env.DATABASE_URL || '';
   if (dbUrl.startsWith('file:')) {
     let dbPath = dbUrl.replace(/^file:/, '');
-    if (!dbPath.startsWith('/')) {
+    if (!dbPath.startsWith('/') && !dbPath.match(/^[A-Z]:/i)) {
       dbPath = path.join(/*turbopackIgnore: true*/ process.cwd(), dbPath);
     }
     return dbPath;
@@ -35,6 +35,8 @@ async function getSqlJs() {
       path.join(/*turbopackIgnore: true*/ process.cwd(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
       path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', 'sql-wasm.wasm'),
       path.join(__dirname, '..', '..', '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+      // Electron packaged: resources/app/app-server/public/
+      path.join(__dirname, '..', '..', '..', '..', 'public', 'sql-wasm.wasm'),
     ];
 
     let wasmPath: string | undefined;

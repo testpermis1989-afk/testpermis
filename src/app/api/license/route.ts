@@ -8,9 +8,16 @@ import { getMachineCode } from '@/lib/machine-id';
  * Returns the machine code and whether the license is active, expired, or absent.
  */
 export async function GET() {
+  // Step 1: Get machine code (may fail in some environments)
+  let machineCode = '????-????-????-????';
   try {
-    const machineCode = getMachineCode();
+    machineCode = getMachineCode();
+  } catch (e) {
+    console.error('[/api/license] getMachineCode failed:', e);
+  }
 
+  // Step 2: Check activation from DB (may fail if DB not initialized yet)
+  try {
     const activation = await db.activation.findFirst();
 
     // No activation record found
@@ -39,11 +46,9 @@ export async function GET() {
       expiryDate: activation.expiryDate,
       durationLabel: activation.durationLabel,
     });
-  } catch (error) {
-    console.error('Failed to check license status:', error);
-    return NextResponse.json(
-      { error: 'Failed to check license status' },
-      { status: 500 }
-    );
+  } catch (e) {
+    // DB might not be initialized yet - just return machine code with not activated
+    console.error('[/api/license] DB check failed (may be first run):', e);
+    return NextResponse.json({ activated: false, machineCode });
   }
 }
