@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getMachineId } from '@/lib/machine-id';
-import { verifyActivationCode } from '@/lib/activation';
+import { getMachineCode, getMachineHash } from '@/lib/machine-id';
+import { verifyActivationCode, getDurationLabel } from '@/lib/activation';
 
 export async function POST(request: Request) {
   try {
@@ -20,8 +20,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get the current machine ID
-    const machineCode = getMachineId();
+    // Get the current machine info
+    const machineCode = getMachineCode();
+    const machineHash = getMachineHash();
 
     // Verify the activation code against this machine
     const result = verifyActivationCode(code, machineCode);
@@ -33,12 +34,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const durationDays = result.durationDays || 30;
+    const expiryDate = result.expiresAt!.toISOString();
+
     // Upsert the activation record
     // First, delete any existing activation
     try {
       const existing = await db.activation.findFirst();
       if (existing) {
-        await db.activation.delete({ where: { id: existing.id } });
+        await db.activation.deleteMany();
       }
     } catch {
       // No existing record, continue
@@ -48,17 +52,21 @@ export async function POST(request: Request) {
     await db.activation.create({
       data: {
         machineCode,
+        machineHash,
         activationCode: code,
-        durationDays: result.durationDays,
-        expiresAt: result.expiresAt,
-        activatedAt: new Date(),
+        durationCode: String(durationDays),
+        durationLabel: getDurationLabel(durationDays),
+        expiryDate,
+        activatedAt: new Date().toISOString(),
+        expiresAt: expiryDate,
       },
     });
 
     return NextResponse.json({
       success: true,
       message: 'Activation successful',
-      expiresAt: result.expiresAt!.toISOString(),
+      expiryDate,
+      durationLabel: getDurationLabel(durationDays),
     });
   } catch (error) {
     console.error('Activation failed:', error);

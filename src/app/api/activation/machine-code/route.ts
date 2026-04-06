@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMachineId } from '@/lib/machine-id';
+import { getMachineCode } from '@/lib/machine-id';
 
 export async function GET() {
   try {
@@ -8,7 +8,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Not available' }, { status: 404 });
     }
 
-    const machineCode = getMachineId();
+    const machineCode = getMachineCode();
 
     return NextResponse.json({ machineCode });
   } catch (error) {
