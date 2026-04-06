@@ -13,27 +13,44 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fallback: si aucun admin dans la DB, permettre admin/admin123
-    if (cin.toLowerCase() === 'admin' && password === 'admin123') {
-      const adminCount = await db.user.count({ where: { role: 'admin' } });
-      if (adminCount === 0) {
-        return NextResponse.json({
-          user: {
-            id: 'fallback-admin',
-            cin: 'ADMIN',
-            nomFr: 'Administrateur',
-            prenomFr: 'Système',
-            nomAr: null,
-            prenomAr: null,
-            photo: null,
-            permisCategory: 'ALL',
-            examDate: null,
-            pinCode: '',
-            isActive: true,
-            role: 'admin',
-          },
-        })
+    // Fallback: admin/admin123 always works in local mode
+    if (cin.toLowerCase() === 'admin' && password === 'admin123' && process.env.STORAGE_MODE === 'local') {
+      // Create admin user if not exists
+      try {
+        const existing = await db.user.findUnique({ where: { cin: 'ADMIN' } });
+        if (!existing) {
+          await db.user.create({
+            data: {
+              cin: 'ADMIN',
+              password: 'admin123',
+              nomFr: 'Administrateur',
+              prenomFr: 'Système',
+              permisCategory: 'ALL',
+              pinCode: '0000',
+              isActive: true,
+              role: 'admin',
+            },
+          });
+        }
+      } catch {
+        // Ignore errors, proceed with login
       }
+      return NextResponse.json({
+        user: {
+          id: 'admin-001',
+          cin: 'ADMIN',
+          nomFr: 'Administrateur',
+          prenomFr: 'Système',
+          nomAr: null,
+          prenomAr: null,
+          photo: null,
+          permisCategory: 'ALL',
+          examDate: null,
+          pinCode: '0000',
+          isActive: true,
+          role: 'admin',
+        },
+      });
     }
 
     const user = await db.user.findUnique({
