@@ -100,8 +100,7 @@
   },
   "build": {
     "npmRebuild": false,
-    "asar": true,
-    "asarUnpack": ["app-server/**"],
+    "asar": false,
     "compression": "store",
     "appId": "com.permis.maroc",
     "productName": "Permis Maroc",
