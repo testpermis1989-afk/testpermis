@@ -170,7 +170,7 @@ export default function ActivationScreen({ onActivated }: ActivationScreenProps)
               <Input
                 value={activationCode}
                 onChange={(e) => setActivationCode(e.target.value.toUpperCase())}
-                placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
+                placeholder="XXXX-XXXX-XXXX-XXXX"
                 className="h-14 text-lg font-mono text-center tracking-widest rounded-xl border-2 border-gray-200 focus:border-emerald-400 focus:ring-emerald-400/20"
                 onKeyDown={(e) => e.key === "Enter" && handleActivate()}
                 disabled={activating || loading}

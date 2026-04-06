@@ -89,8 +89,11 @@ const DURATION_LABELS = {
   'unlimited': 'Illimitee',
 };
 
+// Secure activation: duration and date are HIDDEN inside the hash.
+// Code format: XXXX-XXXX-XXXX-XXXX (16 chars, reveals nothing)
+// Validation: extracts generation info from the code itself (XOR encoded)
+
 function generateActivationCode(machineCode, durationCode) {
-  // machineCode format: XXXX-XXXX-XXXX-XXXX (16 chars uppercase)
   const secret = 'PERMIS_MAROC_2025_SECRET_KEY';
   const days = DURATIONS[durationCode] || 30;
   const label = DURATION_LABELS[durationCode] || '30 jours';
@@ -100,37 +103,87 @@ function generateActivationCode(machineCode, durationCode) {
     ? '2099-12-31'
     : new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  // Use machineCode (not hash) for signature - both admin and client have this value
-  const payload = `${machineCode}|${durationCode}|${expiryDate}|${secret}`;
-  const signature = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 8).toUpperCase();
+  // Day number since epoch (compact, deterministic)
+  const genDay = Math.floor(now.getTime() / 86400000);
+  // Duration index: 0=30d, 1=90d, 2=6mo, 3=1yr, 4=unlimited
+  const durIndex = Object.keys(DURATIONS).indexOf(durationCode);
+  // Pack genDay and durIndex into one number
+  const infoNum = genDay * 10 + durIndex;
 
-  const code = `${signature}-${durationCode.toUpperCase()}-${expiryDate.replace(/-/g, '').substring(2)}`;
+  // Hash includes machineCode + packed info + secret
+  const payload = `${machineCode}|${infoNum}|${secret}`;
+  const hash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  // First 8 chars = verification signature (visible)
+  const sig = hash.substring(0, 8).toUpperCase();
+  // Next 8 chars = hash used to XOR-encode the info number (hidden)
+  const key = hash.substring(8, 16);
+
+  // XOR-encode infoNum into 8 hex chars using key bytes
+  const infoStr = infoNum.toString(16).padStart(8, '0');
+  let encoded = '';
+  for (let i = 0; i < 8; i++) {
+    const c = parseInt(infoStr[i], 16) ^ parseInt(key[i], 16);
+    encoded += c.toString(16).toUpperCase();
+  }
+
+  // Code = SIGSIG-KEYKEY-ENCODED
+  const code = `${sig.slice(0,4)}-${sig.slice(4,8)}-${encoded.slice(0,4)}-${encoded.slice(4,8)}`;
   return { code, durationLabel: label, durationCode, expiryDate };
 }
 
 function validateActivationCode(code, machineCode) {
   try {
-    const parts = code.split('-');
-    if (parts.length < 3) return { valid: false, error: 'Format invalide' };
+    const secret = 'PERMIS_MAROC_2025_SECRET_KEY';
+    const parts = code.replace(/-/g, '').toUpperCase();
+    if (parts.length !== 16) return { valid: false, error: 'Format invalide' };
 
-    // Extract duration from parts[1]
-    const durationCode = parts[1].toLowerCase();
-    if (!DURATIONS[durationCode]) return { valid: false, error: 'Code invalide' };
+    const sigPart = parts.substring(0, 8);
+    const encodedPart = parts.substring(8, 16);
 
-    // Regenerate expected code using this machine's code
-    const expected = generateActivationCode(machineCode, durationCode);
+    const today = Math.floor(Date.now() / 86400000);
+    const durKeys = Object.keys(DURATIONS);
 
-    if (expected.code === code) {
-      // Check expiry
-      if (durationCode !== 'unlimited' && new Date(expected.expiryDate) < new Date()) {
-        return { valid: false, error: 'Code expire' };
+    // Try each duration (5 options) and each generation day (up to 365 back)
+    for (let durIndex = 0; durIndex < durKeys.length; durIndex++) {
+      for (let daysBack = 0; daysBack <= 365; daysBack++) {
+        const genDay = today - daysBack;
+        const infoNum = genDay * 10 + durIndex;
+
+        const payload = `${machineCode}|${infoNum}|${secret}`;
+        const hash = crypto.createHash('sha256').update(payload).digest('hex');
+        const expectedSig = hash.substring(0, 8).toUpperCase();
+
+        // Quick check: signature must match first 8 chars
+        if (expectedSig !== sigPart) continue;
+
+        // Signature matches! Verify the encoded part with XOR key
+        const key = hash.substring(8, 16);
+        let decoded = '';
+        for (let i = 0; i < 8; i++) {
+          const c = parseInt(encodedPart[i], 16) ^ parseInt(key[i], 16);
+          decoded += c.toString(16);
+        }
+
+        if (parseInt(decoded, 16) === infoNum) {
+          // Code is valid! Extract duration and check expiry
+          const durationCode = durKeys[durIndex];
+          const days = DURATIONS[durationCode];
+          const expiryDate = durationCode === 'unlimited'
+            ? '2099-12-31'
+            : new Date((genDay + days) * 86400000).toISOString().split('T')[0];
+
+          if (durationCode !== 'unlimited' && new Date(expiryDate) < new Date()) {
+            return { valid: false, error: 'Code expire' };
+          }
+          return {
+            valid: true,
+            durationCode,
+            durationLabel: DURATION_LABELS[durationCode],
+            expiryDate,
+          };
+        }
       }
-      return {
-        valid: true,
-        durationCode,
-        durationLabel: expected.durationLabel,
-        expiryDate: expected.expiryDate,
-      };
     }
 
     return { valid: false, error: 'Code invalide pour cette machine' };

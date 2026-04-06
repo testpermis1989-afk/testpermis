@@ -1,11 +1,11 @@
 // Activation system - generates and verifies license codes
-// Uses SHA256 signature matching the standalone activation tool format
-// Code format: SIGNATURE-DURATIONCODE-DATE (e.g. "8DA961AB-30D-260506")
+// Duration and date are HIDDEN inside the hash - client cannot see or modify them
+// Code format: XXXX-XXXX-XXXX-XXXX (16 chars, reveals nothing about duration or expiry)
 import crypto from 'crypto';
 
 const SECRET = 'PERMIS_MAROC_2025_SECRET_KEY';
 
-// Duration codes matching the activation tool
+// Duration codes - order must match exactly with activation-tool/main.js
 const DURATIONS: Record<string, number> = {
   '30d': 30,
   '90d': 90,
@@ -22,7 +22,7 @@ const DURATION_LABELS: Record<string, string> = {
   'unlimited': 'Illimitee',
 };
 
-// Supported durations for admin panel
+// Duration options for admin panel UI
 export const LICENSE_DURATIONS = [
   { days: 30, code: '30d', label: '30 jours' },
   { days: 90, code: '90d', label: '90 jours' },
@@ -33,8 +33,8 @@ export const LICENSE_DURATIONS = [
 
 /**
  * Generate an activation code for a specific machine
- * Format: SIGNATURE-DURATIONCODE-DATE (e.g. "8DA961AB-30D-260506")
- * This matches the standalone activation tool format
+ * Duration and expiry date are HIDDEN inside the code - client cannot see them
+ * Code format: XXXX-XXXX-XXXX-XXXX
  */
 export function generateActivationCode(machineCode: string, durationCode: string): {
   code: string;
@@ -50,47 +50,96 @@ export function generateActivationCode(machineCode: string, durationCode: string
     ? '2099-12-31'
     : new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  const payload = `${machineCode}|${durationCode}|${expiryDate}|${SECRET}`;
-  const signature = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 8).toUpperCase();
+  // Day number since epoch (compact, deterministic)
+  const genDay = Math.floor(now.getTime() / 86400000);
+  // Duration index: 0=30d, 1=90d, 2=6mo, 3=1yr, 4=unlimited
+  const durIndex = Object.keys(DURATIONS).indexOf(durationCode);
+  // Pack genDay and durIndex into one number
+  const infoNum = genDay * 10 + durIndex;
 
-  const code = `${signature}-${durationCode.toUpperCase()}-${expiryDate.replace(/-/g, '').substring(2)}`;
+  // Hash includes machineCode + packed info + secret
+  const payload = `${machineCode}|${infoNum}|${SECRET}`;
+  const hash = crypto.createHash('sha256').update(payload).digest('hex');
+
+  // First 8 chars = verification signature (visible)
+  const sig = hash.substring(0, 8).toUpperCase();
+  // Next 8 chars = hash used to XOR-encode the info number (hidden)
+  const key = hash.substring(8, 16);
+
+  // XOR-encode infoNum into 8 hex chars using key bytes
+  const infoStr = infoNum.toString(16).padStart(8, '0');
+  let encoded = '';
+  for (let i = 0; i < 8; i++) {
+    const c = parseInt(infoStr[i], 16) ^ parseInt(key[i], 16);
+    encoded += c.toString(16).toUpperCase();
+  }
+
+  // Code = SIGSIG-ENCODED1-ENCODED2
+  const code = `${sig.slice(0, 4)}-${sig.slice(4, 8)}-${encoded.slice(0, 4)}-${encoded.slice(4, 8)}`;
   return { code, durationLabel: label, expiryDate, durationDays: days };
 }
 
 /**
  * Verify an activation code against a machine code
- * Must match the same format as the activation tool
+ * The code reveals nothing about duration or expiry - all info is hidden
+ * Uses the same algorithm as the standalone activation tool
  */
 export function verifyActivationCode(
   code: string,
   machineCode: string
 ): { valid: boolean; expiresAt?: Date; durationDays?: number; durationLabel?: string; error?: string } {
   try {
-    const parts = code.split('-');
-    if (parts.length < 3) {
+    const parts = code.replace(/[-\s]/g, '').toUpperCase();
+    if (parts.length !== 16) {
       return { valid: false, error: 'Format de code invalide' };
     }
 
-    // Extract duration code from parts[1]
-    const durationCode = parts[1].toLowerCase();
-    if (!DURATIONS[durationCode]) {
-      return { valid: false, error: 'Code invalide' };
-    }
+    const sigPart = parts.substring(0, 8);
+    const encodedPart = parts.substring(8, 16);
 
-    // Regenerate expected code using this machine's code
-    const expected = generateActivationCode(machineCode, durationCode);
+    const today = Math.floor(Date.now() / 86400000);
+    const durKeys = Object.keys(DURATIONS);
 
-    if (expected.code === code) {
-      // Check expiry
-      if (durationCode !== 'unlimited' && new Date(expected.expiryDate) < new Date()) {
-        return { valid: false, error: 'Code expire' };
+    // Try each duration (5 options) and each generation day (up to 365 back)
+    for (let durIndex = 0; durIndex < durKeys.length; durIndex++) {
+      for (let daysBack = 0; daysBack <= 365; daysBack++) {
+        const genDay = today - daysBack;
+        const infoNum = genDay * 10 + durIndex;
+
+        const payload = `${machineCode}|${infoNum}|${SECRET}`;
+        const hash = crypto.createHash('sha256').update(payload).digest('hex');
+        const expectedSig = hash.substring(0, 8).toUpperCase();
+
+        // Quick check: signature must match first 8 chars
+        if (expectedSig !== sigPart) continue;
+
+        // Signature matches! Verify the encoded part with XOR key
+        const key = hash.substring(8, 16);
+        let decoded = '';
+        for (let i = 0; i < 8; i++) {
+          const c = parseInt(encodedPart[i], 16) ^ parseInt(key[i], 16);
+          decoded += c.toString(16);
+        }
+
+        if (parseInt(decoded, 16) === infoNum) {
+          // Code is valid! Extract duration and check expiry
+          const durationCode = durKeys[durIndex];
+          const days = DURATIONS[durationCode];
+          const expiryDate = durationCode === 'unlimited'
+            ? '2099-12-31'
+            : new Date((genDay + days) * 86400000).toISOString().split('T')[0];
+
+          if (durationCode !== 'unlimited' && new Date(expiryDate) < new Date()) {
+            return { valid: false, error: 'Code expire' };
+          }
+          return {
+            valid: true,
+            expiresAt: new Date(expiryDate),
+            durationDays: days,
+            durationLabel: DURATION_LABELS[durationCode],
+          };
+        }
       }
-      return {
-        valid: true,
-        expiresAt: new Date(expected.expiryDate),
-        durationDays: expected.durationDays,
-        durationLabel: expected.durationLabel,
-      };
     }
 
     return { valid: false, error: 'Code invalide pour cet ordinateur' };
