@@ -4402,21 +4402,27 @@ export default function DrivingTestApp() {
   useEffect(() => {
     const isLocalMode = process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
     if (!isLocalMode) {
-      setIsActivated(true); // Skip activation check on Vercel/cloud
+      // Skip activation check on Vercel/cloud - set directly in useState initializer
       return;
     }
     
+    let cancelled = false;
     const checkActivation = async () => {
       try {
         const res = await fetch('/api/license');
         const data = await res.json();
-        setIsActivated(data.activated === true);
+        if (!cancelled) {
+          setIsActivated(data.activated === true);
+        }
       } catch {
         // If API fails, allow access (graceful fallback)
-        setIsActivated(true);
+        if (!cancelled) {
+          setIsActivated(true);
+        }
       }
     };
     checkActivation();
+    return () => { cancelled = true; };
   }, []);
 
   const handleActivationSuccess = () => {

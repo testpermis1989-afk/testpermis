@@ -4,22 +4,23 @@
 // Code format: XXXX-XXXX-XXXX-XXXX-XXXX (20 chars)
 //   [machine_id: 8 hex] [expiry: 6 digits YYMMDD] [duration: 2 chars] [signature: 4 hex]
 //
-// Example: A3B7-C912-250715-1Y-K9M2
-//   Machine: A3B7C912  Expiry: 15/07/2025  Duration: 1Y (1 year)  Sig: K9M2
+// Example: A5C6-9B04-260506-30-DB9A
+//   Machine: A5C69B04  Expiry: 06/05/2026  Duration: 30 (30 days)  Sig: DB9A
 
 import crypto from 'crypto';
 
 // Secret key - only the admin knows this
 const SECRET_KEY = 'PM-2025-LICENSE-ACTIVATION-KEY';
 
-export type LicenseDuration = '30d' | '90d' | '180d' | '365d' | 'INF';
+// Duration codes are exactly 2 chars for the code format
+export type LicenseDuration = '30' | '90' | '18' | '36' | 'UL';
 
 export const DURATION_OPTIONS: { value: LicenseDuration; label: string; days: number }[] = [
-  { value: '30d', label: '30 jours', days: 30 },
-  { value: '90d', label: '3 mois', days: 90 },
-  { value: '180d', label: '6 mois', days: 180 },
-  { value: '365d', label: '1 an', days: 365 },
-  { value: 'INF', label: 'Illimité', days: 36500 },
+  { value: '30', label: '30 jours', days: 30 },
+  { value: '90', label: '3 mois', days: 90 },
+  { value: '18', label: '6 mois', days: 180 },
+  { value: '36', label: '1 an', days: 365 },
+  { value: 'UL', label: 'Illimité', days: 36500 },
 ];
 
 function getDurationCode(duration: LicenseDuration): string {
@@ -51,7 +52,7 @@ export function generateActivationCode(machineCode: string, duration: LicenseDur
   const days = getDurationDays(duration);
   const expiry = new Date();
   expiry.setDate(expiry.getDate() + days);
-  const expiryDate = duration === 'INF' ? '2099-12-31' : expiry.toISOString().split('T')[0];
+  const expiryDate = duration === 'UL' ? '2099-12-31' : expiry.toISOString().split('T')[0];
 
   // Format expiry as YYMMDD
   const yy = expiryDate.substring(2, 4);
@@ -59,7 +60,7 @@ export function generateActivationCode(machineCode: string, duration: LicenseDur
   const dd = expiryDate.substring(8, 10);
   const expiryShort = `${yy}${mm}${dd}`;
 
-  // Duration code
+  // Duration code (2 chars)
   const durCode = getDurationCode(duration);
 
   // HMAC signature of machine_id + expiry + duration
@@ -101,10 +102,10 @@ export function validateActivationCode(code: string, machineHash: string): {
     }
 
     // Parse parts
-    const machineId = raw.slice(0, 8);       // Machine ID
-    const expiryShort = raw.slice(8, 14);    // YYMMDD
-    const durCode = raw.slice(14, 16);       // Duration code
-    const sig = raw.slice(16, 20);           // Signature
+    const machineId = raw.slice(0, 8);       // Machine ID (8 hex)
+    const expiryShort = raw.slice(8, 14);    // YYMMDD (6 digits)
+    const durCode = raw.slice(14, 16);       // Duration code (2 chars)
+    const sig = raw.slice(16, 20);           // HMAC signature (4 hex)
 
     // Verify machine ID matches
     const currentMachineId = machineHash.substring(0, 8).toUpperCase();

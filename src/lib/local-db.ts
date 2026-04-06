@@ -111,7 +111,8 @@ class Database {
   async prepare(sql: string): Promise<PreparedStmt> {
     await this.init();
     const stmt = this.db!.prepare(sql);
-    // Arrow functions capture `this` from enclosing Database method scope
+    // Store reference to markDirty for use in closures (avoids `this` binding issues)
+    const markDirty = () => this.markDirty();
     return {
       async get(...params: any[]): Promise<Record<string, any> | undefined> {
         try {
@@ -140,8 +141,8 @@ class Database {
         try {
           if (params.length > 0) stmt.bind(params as any[]);
           stmt.step();
-          const changes = this.db!.getRowsModified();
-          this.markDirty();
+          const changes = this.db ? this.db.getRowsModified() : 0;
+          markDirty();
           return { changes };
         } finally {
           stmt.free();

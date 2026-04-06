@@ -28,9 +28,9 @@ import { AlertCircle } from "lucide-react";
 const DURATION_OPTIONS = [
   { value: "30", label: "30 jours", days: 30 },
   { value: "90", label: "3 mois", days: 90 },
-  { value: "180", label: "6 mois", days: 180 },
-  { value: "365", label: "1 an", days: 365 },
-  { value: "0", label: "Illimité", days: 0 },
+  { value: "18", label: "6 mois", days: 180 },
+  { value: "36", label: "1 an", days: 365 },
+  { value: "UL", label: "Illimité", days: 36500 },
 ];
 
 interface License {

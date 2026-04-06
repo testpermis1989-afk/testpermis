@@ -93,3 +93,27 @@ model TestResult {
   createdAt   DateTime @default(now())
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
+
+model Activation {
+  id             String   @id @default(cuid())
+  activationCode String
+  machineCode    String
+  machineHash    String
+  durationCode   String
+  durationLabel  String
+  expiryDate     String
+  activatedAt    String
+  expiresAt      String
+}
+
+model License {
+  id             String   @id @default(cuid())
+  machineCode    String
+  activationCode String   @unique
+  clientName     String?
+  durationCode   String
+  durationLabel  String
+  durationDays   Int
+  expiryDate     String
+  createdAt      String   @default(now())
+}
