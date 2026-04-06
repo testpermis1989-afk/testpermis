@@ -345,3 +345,31 @@ Stage Summary:
 - Fixed: .env now includes Supabase env vars
 - Both repos pushed, Vercel redeployed successfully
 - Key change: src/lib/client-upload.ts rewritten to use createClient() instead of raw fetch
+---
+## Task ID: 3
+### Work Task
+Create 3 new API routes for the license activation system using the HMAC-SHA256 based `@/lib/license-crypto` module (replacing the older AES-based `@/lib/activation` system).
+
+### Work Summary
+
+Created 3 API route files:
+
+1. **`src/app/api/license/route.ts`** (GET)
+   - Calls `getMachineCode()` from `@/lib/machine-id` to get the current machine's human-readable code
+   - Checks `db.activation.findFirst()` for existing activation
+   - Returns `{ activated, machineCode, expiryDate?, durationLabel?, reason? }` with 3 states: no activation, expired, active
+   - Uses end-of-day comparison (`now.setHours(23,59,59,999)`) for expiry check
+
+2. **`src/app/api/license/activate/route.ts`** (POST)
+   - Accepts `{ activationCode: string }` from request body
+   - Validates using `getMachineHash()` + `validateActivationCode()` from `@/lib/license-crypto`
+   - Returns 400 with descriptive error for invalid codes (wrong machine, expired, bad signature, invalid format)
+   - On success: clears previous activations via `db.activation.deleteMany()`, stores new record via `db.activation.create()`
+   - Returns `{ success: true, expiryDate, durationLabel }`
+
+3. **`src/app/api/admin/license/route.ts`** (GET + POST)
+   - GET: returns all licenses via `db.license.findMany()`
+   - POST: accepts `{ machineCode, duration, clientName? }`, validates duration against `DURATION_OPTIONS` from `@/lib/license-crypto`, generates activation code via `generateActivationCode()`, persists via `db.license.create()`
+   - Returns `{ success: true, code, expiryDate, durationLabel }`
+
+All routes use `NextRequest`/`NextResponse` from `next/server`, `db` from `@/lib/db`, proper try/catch with 500 fallbacks. ESLint passes clean (only pre-existing errors in scripts/copy-build.js).
