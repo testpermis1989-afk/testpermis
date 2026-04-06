@@ -45,3 +45,26 @@ Stage Summary:
 - Dev tools disabled in production
 - IPC handlers exposed via preload for machine code generation and app paths
 - Build scripts configured for proper offline desktop packaging
+
+---
+Task ID: 3
+Agent: main
+Task: Create downloadable ZIP with icon and complete project for Electron desktop build
+
+Work Log:
+- Started dev server with local mode (STORAGE_MODE=local) - app loads successfully
+- Generated Windows .ico icon file (54KB, multi-size: 16/32/48/64/128/256px) from existing 512x512 PNG using sharp
+- Updated package.json electron-builder config to use public/icon.ico as the app icon
+- Created comprehensive README_BUILD.txt with build instructions, prerequisites, features, troubleshooting
+- Created TestPermis_Desktop.zip (5.9MB, 233 files) containing:
+  - Full source code (src/, electron/, scripts/, prisma/)
+  - All static assets (public/ - icons, images, WASM, etc.)
+  - Configuration files (package.json, next.config.ts, .env.local, etc.)
+  - README_BUILD.txt with detailed build instructions
+  - icon.ico for Windows application icon
+
+Stage Summary:
+- Downloadable ZIP at download/TestPermis_Desktop.zip (5.9MB, 233 files)
+- Contains everything needed to build PermisMaroc.exe on Windows
+- Build steps: npm install → npm run electron:build:portable → dist-electron/PermisMaroc.exe
+- Icon properly configured in electron-builder config

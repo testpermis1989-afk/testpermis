@@ -131,7 +131,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icons/icon-512x512.png",
+      "icon": "public/icon.ico",
       "artifactName": "PermisMaroc.exe"
     },
     "portable": {
