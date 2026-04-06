@@ -109,20 +109,7 @@
     },
     "files": [
       "electron/**",
-      ".next/standalone/**",
-      "node_modules/sql.js/dist/sql-wasm.wasm",
-      "node_modules/.prisma/**"
-    ],
-    "extraResources": [
-      {
-        "from": "public",
-        "to": "public",
-        "filter": ["**/*", "!sw.js", "!workbox-*.js", "!manifest.json"]
-      },
-      {
-        "from": "node_modules/.prisma",
-        "to": "node_modules/.prisma"
-      }
+      "app-server/**"
     ],
     "win": {
       "target": [

@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn, fork } = require('child_process');
+const { spawn } = require('child_process');
 const http = require('http');
 
 let mainWindow;
@@ -22,26 +22,52 @@ const dbDir = path.join(basePath, 'db');
   }
 });
 
-// Standalone server directory
-const standaloneDir = path.join(__dirname, '..', '.next', 'standalone');
-const serverJs = path.join(standaloneDir, 'server.js');
+// Find standalone server directory
+// In packaged app: resources/app/app-server/server.js
+// In development: project-root/app-server/server.js
+function findServerDir() {
+  const isPackaged = app.isPackaged;
 
-// Check if standalone build exists
-function checkStandaloneExists() {
-  // Check development mode (next dev) vs production (standalone)
-  if (!fs.existsSync(standaloneDir) || !fs.existsSync(serverJs)) {
-    return false;
+  if (isPackaged) {
+    // Packaged app: app-server is in resources/app/app-server/
+    const appPath = app.getAppPath(); // resources/app/
+    const p1 = path.join(appPath, 'app-server');
+    if (fs.existsSync(path.join(p1, 'server.js'))) return p1;
+
+    // Fallback: try relative to __dirname (electron/)
+    const p2 = path.join(__dirname, '..', 'app-server');
+    if (fs.existsSync(path.join(p2, 'server.js'))) return p2;
+
+    // Fallback: try .next/standalone (old location)
+    const p3 = path.join(appPath, '.next', 'standalone');
+    if (fs.existsSync(path.join(p3, 'server.js'))) return p3;
+
+    console.error('[Electron] server.js NOT found in packaged app. Tried:');
+    console.error('  1. ' + p1);
+    console.error('  2. ' + p2);
+    console.error('  3. ' + p3);
+    return null;
+  } else {
+    // Development: look in project root
+    const p1 = path.join(__dirname, '..', 'app-server');
+    if (fs.existsSync(path.join(p1, 'server.js'))) return p1;
+
+    const p2 = path.join(__dirname, '..', '.next', 'standalone');
+    if (fs.existsSync(path.join(p2, 'server.js'))) return p2;
+
+    console.error('[Electron] server.js NOT found in dev mode. Tried:');
+    console.error('  1. ' + p1);
+    console.error('  2. ' + p2);
+    return null;
   }
-  return true;
 }
 
 // Poll server until ready
-function waitForServer(port, maxRetries = 30) {
+function waitForServer(port, maxRetries = 60) {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const check = () => {
       const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
-        // Server is responding
         resolve(true);
       });
       req.on('error', () => {
@@ -81,7 +107,7 @@ function createWindow() {
       webSecurity: true,
     },
     autoHideMenuBar: true,
-    show: false, // Show after ready
+    show: false,
     backgroundColor: '#E0E0E0',
   });
 
@@ -100,49 +126,47 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-
-  // Disable dev tools in production
-  if (process.env.NODE_ENV === 'production' || !process.argv.includes('--dev')) {
-    mainWindow.webContents.on('devtools-opened', () => {
-      mainWindow.webContents.closeDevTools();
-    });
-  }
 }
 
-// Start Next.js server using Electron's embedded Node.js
+// Start Next.js server
 function startNextServer() {
   const isDev = process.argv.includes('--dev');
   const PORT = 3000;
 
   if (isDev) {
-    // Development mode - assume user runs `next dev` separately
     console.log('[Electron] Development mode - waiting for next dev server on port 3000...');
     waitForServer(PORT).then(() => {
       serverReady = true;
       loadAppUrl(PORT);
     }).catch(() => {
-      console.error('[Electron] Next.js dev server not found. Please run: STORAGE_MODE=local next dev -p 3000');
+      console.error('[Electron] Next.js dev server not found.');
     });
     return;
   }
 
-  if (!checkStandaloneExists()) {
-    console.error(`[Electron] Standalone build not found at: ${standaloneDir}`);
-    console.error('[Electron] Please run "npm run build" first');
+  const serverDir = findServerDir();
+  if (!serverDir) {
+    console.error('[Electron] Standalone build not found!');
     if (mainWindow) {
-      showErrorPage('Build not found', 'Please run "npm run build" first to create the standalone build.');
+      showErrorPage('Build not found',
+        'The application server files are missing.\n\n' +
+        'Please run: BUILD_PORTABLE.bat\n' +
+        'or: npm run electron:build:portable'
+      );
     }
     return;
   }
 
+  const serverJs = path.join(serverDir, 'server.js');
+  console.log(`[Electron] Server directory: ${serverDir}`);
+  console.log(`[Electron] Server script: ${serverJs}`);
+
   // Use ELECTRON_RUN_AS_NODE=1 to make Electron act as Node.js
-  // This is the key fix: it allows running the standalone server.js
-  // using Electron's built-in Node.js without needing a separate node.exe
   const electronExe = process.execPath;
-  
+
   const env = {
     ...process.env,
-    ELECTRON_RUN_AS_NODE: '1',  // KEY: Makes Electron behave as plain Node.js
+    ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     PORT: String(PORT),
     HOSTNAME: '127.0.0.1',
@@ -151,14 +175,12 @@ function startNextServer() {
     DATABASE_URL: `file:${path.join(dbDir, 'permis.db')}`,
   };
 
-  console.log(`[Electron] Starting Next.js server with ELECTRON_RUN_AS_NODE=1...`);
-  console.log(`[Electron] Executable: ${electronExe}`);
-  console.log(`[Electron] Server script: ${serverJs}`);
+  console.log(`[Electron] Starting Next.js server on port ${PORT}...`);
   console.log(`[Electron] Data dir: ${dataDir}`);
   console.log(`[Electron] DB path: ${path.join(dbDir, 'permis.db')}`);
 
   nextProcess = spawn(electronExe, [serverJs], {
-    cwd: standaloneDir,
+    cwd: serverDir,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
@@ -176,26 +198,33 @@ function startNextServer() {
   });
 
   nextProcess.on('error', (err) => {
-    console.error(`[Electron] Failed to start Next.js server: ${err.message}`);
+    console.error(`[Electron] Failed to start server: ${err.message}`);
     if (mainWindow) {
       showErrorPage('Server Error', `Failed to start: ${err.message}`);
     }
   });
 
   nextProcess.on('close', (code, signal) => {
-    console.log(`[Next.js] Process exited with code ${code}, signal ${signal}`);
+    console.log(`[Next.js] Process exited with code ${code}`);
     serverReady = false;
   });
 
-  // Wait for server to be ready
+  // Wait for server
   waitForServer(PORT, 60).then(() => {
     console.log('[Electron] Next.js server is ready!');
     serverReady = true;
     loadAppUrl(PORT);
   }).catch((err) => {
-    console.error(`[Electron] Server failed to start: ${err.message}`);
+    console.error(`[Electron] Server failed: ${err.message}`);
     if (mainWindow) {
-      showErrorPage('Startup Error', `Server failed to start. Please try again.\n\n${err.message}`);
+      showErrorPage('Startup Error',
+        `Server failed to start after 60 seconds.\n\n` +
+        `Try running manually:\n` +
+        `set NEXT_PUBLIC_STORAGE_MODE=local\n` +
+        `npx next build\n` +
+        `node scripts/copy-build.js\n` +
+        `npx electron-builder --win portable --x64`
+      );
     }
   });
 }
@@ -218,7 +247,7 @@ function showErrorPage(title, message) {
           body { font-family: 'Segoe UI', Arial, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f5; color: #333; }
           .container { text-align: center; padding: 40px; max-width: 500px; }
           h1 { color: #e74c3c; margin-bottom: 20px; }
-          p { color: #666; line-height: 1.6; }
+          p { color: #666; line-height: 1.6; white-space: pre-line; }
           .icon { font-size: 64px; margin-bottom: 20px; }
         </style>
       </head>
@@ -236,27 +265,20 @@ function showErrorPage(title, message) {
 
 // IPC handlers
 ipcMain.handle('get-app-paths', () => {
-  return {
-    dataDir,
-    uploadsDir,
-    tempDir,
-    dbDir,
-    basePath,
-    isElectron: true,
-  };
+  return { dataDir, uploadsDir, tempDir, dbDir, basePath, isElectron: true };
 });
 
 ipcMain.handle('get-machine-info', () => {
   const os = require('os');
   const crypto = require('crypto');
-  
+
   const cpus = os.cpus();
   const cpuModel = cpus.length > 0 ? cpus[0].model : 'unknown';
   const cpuCores = cpus.length.toString();
   const hostname = os.hostname();
   const platform = os.platform();
   const arch = os.arch();
-  
+
   let mac = '';
   const networks = os.networkInterfaces();
   for (const name of Object.keys(networks)) {
@@ -273,7 +295,7 @@ ipcMain.handle('get-machine-info', () => {
   const hash = crypto.createHash('sha256').update(raw).digest('hex');
   const code = hash.substring(0, 16).toUpperCase();
   const machineCode = `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}-${code.slice(12, 16)}`;
-  
+
   return { machineCode, machineHash: hash };
 });
 
@@ -285,44 +307,24 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
-      if (serverReady) {
-        loadAppUrl(3000);
-      }
+      if (serverReady) loadAppUrl(3000);
     }
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    cleanupAndQuit();
-  }
+  if (process.platform !== 'darwin') cleanupAndQuit();
 });
 
-app.on('before-quit', () => {
-  cleanupAndQuit();
-});
+app.on('before-quit', () => cleanupAndQuit());
 
 function cleanupAndQuit() {
   if (nextProcess) {
-    try {
-      nextProcess.kill('SIGTERM');
-    } catch (e) {
-      // Process might already be dead
-    }
-    try {
-      nextProcess.kill('SIGKILL');
-    } catch (e) {
-      // Ignore
-    }
+    try { nextProcess.kill('SIGTERM'); } catch (e) {}
+    try { nextProcess.kill('SIGKILL'); } catch (e) {}
     nextProcess = null;
   }
 }
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('[Electron] Uncaught Exception:', err);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('[Electron] Unhandled Rejection:', reason);
-});
+process.on('uncaughtException', (err) => console.error('[Electron] Uncaught:', err));
+process.on('unhandledRejection', (reason) => console.error('[Electron] Rejection:', reason));
