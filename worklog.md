@@ -373,3 +373,55 @@ Created 3 API route files:
    - Returns `{ success: true, code, expiryDate, durationLabel }`
 
 All routes use `NextRequest`/`NextResponse` from `next/server`, `db` from `@/lib/db`, proper try/catch with 500 fallbacks. ESLint passes clean (only pre-existing errors in scripts/copy-build.js).
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix licensing system bugs - duration codes, local-db closures, Prisma schema
+
+Work Log:
+- Diagnosed 3 critical bugs in the licensing system:
+  1. Duration codes in license-crypto.ts were 3 chars (30d,90d,180d,365d,INF) but format expects 2 chars (20 total)
+  2. local-db.ts prepare() closures had `this` binding issue - arrow functions in returned object could not access `this.markDirty()` and `this.db.getRowsModified()`
+  3. AdminLicensePanel.tsx sent duration values ("180","365","0") that did not match license-crypto.ts codes ("30d","90d",etc.)
+  4. Prisma schema missing Activation and License models (only needed for cloud mode)
+
+- Fixed `src/lib/license-crypto.ts`:
+  - Changed duration codes to 2-char format: 30, 90, 18, 36, UL
+  - Updated LicenseDuration type and DURATION_OPTIONS accordingly
+  - Code format now correctly produces 20-char codes: XXXX-XXXX-XXXX-XXXX-XXXX
+
+- Fixed `src/lib/local-db.ts`:
+  - In prepare() method, captured `markDirty` as a closure variable: `const markDirty = () => this.markDirty()`
+  - Used `this.db` directly (works since prepare() awaits init())
+  - Added null safety: `this.db ? this.db.getRowsModified() : 0`
+
+- Fixed `src/components/AdminLicensePanel.tsx`:
+  - Updated DURATION_OPTIONS values to match: "30","90","18","36","UL"
+  - Illimité uses "UL" with 36500 days
+
+- Added to `prisma/schema.prisma`:
+  - Activation model (9 fields: id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt)
+  - License model (9 fields: id, machineCode, activationCode, clientName, durationCode, durationLabel, durationDays, expiryDate, createdAt)
+
+- Fixed `src/app/page.tsx`:
+  - Removed direct setState call in useEffect for cloud mode skip
+  - Added cancellation flag for cleanup
+
+- Full end-to-end test passed:
+  - GET /api/license → {"activated":false,"machineCode":"A5C6-9B04-0E13-4CE1"}
+  - POST /api/admin/license → {"success":true,"code":"A5C6-9B04-2704-0636-4C7A",...}
+  - POST /api/license/activate → {"success":true,"expiryDate":"2027-04-06","durationLabel":"1 an"}
+  - GET /api/license → {"activated":true,"machineCode":"A5C6-9B04-0E13-4CE1",...}
+
+- Pushed to testpermis1989-afk/testpermis (desktop repo)
+
+Stage Summary:
+- Licensing system fully functional in local/desktop mode
+- Machine Code generation from hardware fingerprint (CPU, hostname, MAC)
+- Admin can generate time-limited activation codes (30d, 90d, 6mo, 1yr, unlimited)
+- Each code is HMAC-SHA256 signed and machine-locked
+- Activation status checked on every app launch
+- ActivationScreen shown when not activated (local mode only)
+- AdminLicensePanel integrated in admin panel under "Licences" tab
+- Cloud mode (Vercel) skips activation check entirely
