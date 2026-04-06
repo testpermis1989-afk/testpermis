@@ -145,3 +145,17 @@ Stage Summary:
 - **ROOT CAUSE**: Admin used fakeHash (padded machine code) while client used real machine fingerprint hash → signature mismatch
 - **FIX**: Both generation and validation now use the displayable machine code (XXXX-XXXX-XXXX-XXXX)
 - User needs to rebuild activation tool: run BUILD.bat in activation-tool/ folder on Windows
+
+---
+Task ID: 7
+Agent: main
+Task: Generate two ZIP files for download (main app + activation tool)
+
+Work Log:
+- Created main app ZIP: TestPermis_Desktop.zip (5.8 MB) at public/
+- Created activation tool ZIP: PermisMaroc-Activation.zip (62 KB) at public/
+- Both include the activation fix (machineCode-based instead of hash-based)
+
+Stage Summary:
+- TestPermis_Desktop.zip: Full main app with BUILD.bat → builds PermisMaroc.exe (NSIS installer)
+- PermisMaroc-Activation.zip: Standalone activation tool with BUILD.bat → builds PermisMaroc-Activation-Setup.exe
