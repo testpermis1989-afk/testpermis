@@ -1,11 +1,16 @@
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose protected APIs to renderer
+// Expose protected APIs to renderer via contextBridge
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   isElectron: true,
-  getDataPath: () => {
-    // Will be filled by main process
-    return null;
-  },
+  
+  // Get application paths (data dir, db dir, etc.)
+  getAppPaths: () => ipcRenderer.invoke('get-app-paths'),
+  
+  // Get machine code for licensing
+  getMachineInfo: () => ipcRenderer.invoke('get-machine-info'),
+  
+  // Check if running in Electron
+  isDesktop: () => true,
 });

@@ -25,6 +25,7 @@ function copyRecursiveSync(src, dest) {
 const root = process.cwd();
 const standaloneStatic = path.join(root, '.next', 'standalone', '.next', 'static');
 const standalonePublic = path.join(root, '.next', 'standalone', 'public');
+const standaloneNodeModules = path.join(root, '.next', 'standalone', 'node_modules');
 const staticSource = path.join(root, '.next', 'static');
 const publicSource = path.join(root, 'public');
 
@@ -36,7 +37,7 @@ console.log('Copying public to .next/standalone/public ...');
 copyRecursiveSync(publicSource, standalonePublic);
 console.log('Done.');
 
-// Copy sql.js WASM file to public (so it's available at runtime)
+// Copy sql.js WASM file to standalone public (for runtime loading)
 const wasmSource = path.join(root, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
 const wasmDest = path.join(standalonePublic, 'sql-wasm.wasm');
 if (fs.existsSync(wasmSource)) {
@@ -45,6 +46,17 @@ if (fs.existsSync(wasmSource)) {
   console.log('Done.');
 } else {
   console.log('Warning: sql-wasm.wasm not found in node_modules, skipping.');
+}
+
+// Copy sql.js module to standalone node_modules (needed for server-side import)
+const sqlJsDir = path.join(root, 'node_modules', 'sql.js');
+const sqlJsDest = path.join(standaloneNodeModules, 'sql.js');
+if (fs.existsSync(sqlJsDir)) {
+  console.log('Copying sql.js to standalone/node_modules ...');
+  copyRecursiveSync(sqlJsDir, sqlJsDest);
+  console.log('Done.');
+} else {
+  console.log('Warning: sql.js not found in node_modules, skipping.');
 }
 
 console.log('Build post-process complete!');
