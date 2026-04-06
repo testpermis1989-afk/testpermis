@@ -100,7 +100,8 @@
   },
   "build": {
     "npmRebuild": false,
-    "asar": false,
+    "asar": true,
+    "asarUnpack": ["app-server/**"],
     "appId": "com.permis.maroc",
     "productName": "Permis Maroc",
     "copyright": "Copyright © 2025 Permis Maroc",
@@ -131,7 +132,8 @@
       "shortcutName": "Permis Maroc",
       "artifactName": "PermisMaroc-Setup.exe",
       "uninstallDisplayName": "Permis Maroc",
-      "language": 1036
+      "language": 1036,
+      "compression": "store"
     }
   },
   "devDependencies": {

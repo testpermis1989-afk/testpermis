@@ -33,20 +33,29 @@ function findEntryFile(dir) {
   return null;
 }
 
+// Convert asar path to real filesystem path (for unpacked files)
+function asarToRealPath(asarPath) {
+  if (asarPath.includes('.asar')) {
+    return asarPath.replace('.asar' + path.sep, '.asar.unpacked' + path.sep);
+  }
+  return asarPath;
+}
+
 // Find standalone server directory
 function findServerDir() {
   const isPackaged = app.isPackaged;
 
   if (isPackaged) {
-    // Packaged app: app-server is in resources/app/app-server/
-    const appPath = app.getAppPath(); // resources/app/
+    // Packaged app: app-server is unpacked from asar
+    const appPath = app.getAppPath();
     const dirs = [
-      path.join(appPath, 'app-server'),
-      path.join(__dirname, '..', 'app-server'),
-      path.join(appPath, '.next', 'standalone'),
+      asarToRealPath(path.join(appPath, 'app-server')),
+      asarToRealPath(path.join(__dirname, '..', 'app-server')),
+      asarToRealPath(path.join(appPath, '.next', 'standalone')),
     ];
     for (const d of dirs) {
-      if (findEntryFile(d)) return { dir: d, entry: findEntryFile(d) };
+      const realDir = asarToRealPath(d);
+      if (findEntryFile(realDir)) return { dir: realDir, entry: findEntryFile(realDir) };
     }
     console.error('[Electron] Server entry NOT found in packaged app. Tried:');
     dirs.forEach((d, i) => console.error(`  ${i+1}. ${d}`));
