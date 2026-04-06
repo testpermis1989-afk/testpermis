@@ -110,7 +110,24 @@
     },
     "files": [
       "electron/**",
-      "app-server/**"
+      "app-server/**",
+      "!app-server/skills/**",
+      "!app-server/upload/**",
+      "!app-server/examples/**",
+      "!app-server/.prisma/**",
+      "!app-server/**/*.zip",
+      "!app-server/**/README.md",
+      "!app-server/**/LICENSE",
+      "!app-server/**/CHANGELOG*",
+      "!app-server/**/.eslint*",
+      "!app-server/**/tsconfig*",
+      "!app-server/**/*.map",
+      "!app-server/**/src/**",
+      "!app-server/node_modules/typescript/**",
+      "!app-server/node_modules/@img/sharp-libvips-linux*/**",
+      "!app-server/node_modules/@img/sharp-linux*/**",
+      "!app-server/node_modules/source-map/**",
+      "!app-server/node_modules/source-map-support/**"
     ],
     "win": {
       "target": [

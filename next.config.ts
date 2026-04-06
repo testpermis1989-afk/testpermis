@@ -20,6 +20,26 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '100mb',
     },
   },
+  // Exclude packages from standalone file tracing to reduce build size
+  outputFileTracingExcludes: {
+    '*': [
+      // Exclude sharp Linux binaries (app is Windows-only)
+      'node_modules/@img/sharp-libvips-linux-x64/**',
+      'node_modules/@img/sharp-libvips-linuxmusl-x64/**',
+      'node_modules/@img/sharp-linux-x64/**',
+      'node_modules/@img/sharp-linuxmusl-x64/**',
+      // Exclude typescript (not needed at runtime)
+      'node_modules/typescript/**',
+      // Exclude source maps
+      'node_modules/source-map/**',
+      'node_modules/source-map-support/**',
+      // Exclude unnecessary project files from standalone
+      'skills/**',
+      'upload/**',
+      'examples/**',
+      '*.zip',
+    ],
+  },
 };
 
 export default nextConfig;
