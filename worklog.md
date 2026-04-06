@@ -96,3 +96,26 @@ Stage Summary:
 - No manual terminal steps needed - installer handles everything
 - Desktop shortcut and Start Menu shortcut created automatically
 - Icon (icon.ico) included for Windows app icon
+
+---
+Task ID: 5
+Agent: main
+Task: Fix BUILD.bat --no-turbopack error causing server.js not found
+
+Work Log:
+- User reported: `error: unknown option '--no-turbopack'` when running BUILD.bat on Windows
+- Root cause: BUILD.bat line 23 had `npx next build --no-turbopack` but Next.js 16 doesn't have this flag (Turbopack is the default)
+- Because the build failed, .next/standalone/server.js was never generated, causing the secondary "server.js NOT found" error
+- Verified by running `next build` without the flag - build succeeds and server.js IS generated in .next/standalone/
+- Fixed BUILD.bat: changed `npx next build --no-turbopack` to `npx next build`
+- Deleted problematic BAT files with Unicode characters (BUILD_PORTABLE.bat, INSTALLER.bat, UPDATE_FROM_GITHUB.bat, README_BUILD.txt)
+- Rewrote LAUNCH.bat in pure ASCII
+- Added app-server/ to eslint ignores
+- Pushed fix to testpermis1989-afk/testpermis
+- Created updated TestPermis_Desktop.zip (12MB) at download/
+
+Stage Summary:
+- **ROOT CAUSE FOUND**: The `--no-turbopack` flag (invalid in Next.js 16) was the ONLY reason server.js was missing
+- Next.js 16 with Turbopack standalone DOES generate server.js correctly
+- All other build pipeline scripts (copy-build.js, electron/main.js) work correctly as-is
+- User just needs to `git pull` and re-run BUILD.bat
