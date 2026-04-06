@@ -59,3 +59,9 @@ public/uploads/
 
 # db
 *.db
+
+# electron build output
+dist-electron/
+
+# download files
+download/
