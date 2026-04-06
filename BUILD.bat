@@ -18,9 +18,9 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [2/4] next build (no turbopack for standalone)...
+echo [2/4] next build (standalone)...
 set NEXT_PUBLIC_STORAGE_MODE=local
-call npx next build --no-turbopack
+call npx next build
 if %errorlevel% neq 0 (
     echo ERROR: next build failed!
     pause
