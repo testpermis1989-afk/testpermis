@@ -26,6 +26,13 @@ const root = process.cwd();
 const nextStandalone = path.join(root, '.next', 'standalone');
 const appServer = path.join(root, 'app-server');
 
+// Check standalone directory exists
+if (!fs.existsSync(nextStandalone)) {
+  console.error(`\nERROR: .next/standalone/ directory not found at ${nextStandalone}`);
+  console.error('Make sure next.config.ts has output: "standalone"');
+  process.exit(1);
+}
+
 // 1. Copy .next/static into standalone's .next/static
 const standaloneStatic = path.join(nextStandalone, '.next', 'static');
 const staticSource = path.join(root, '.next', 'static');
@@ -75,13 +82,32 @@ if (fs.existsSync(appServer)) {
 copyRecursiveSync(nextStandalone, appServer);
 console.log('Done.');
 
-// Verify
-const serverJs = path.join(appServer, 'server.js');
-if (fs.existsSync(serverJs)) {
-  console.log(`\n✅ Build ready! server.js at: ${serverJs}`);
-} else {
-  console.error(`\n❌ ERROR: server.js NOT found at ${serverJs}`);
+// 7. Find the server entry point (server.js, index.js, or any main JS file)
+const entryFiles = ['server.js', 'index.js', 'main.js'];
+let foundEntry = null;
+
+for (const f of entryFiles) {
+  const fp = path.join(appServer, f);
+  if (fs.existsSync(fp)) {
+    foundEntry = f;
+    break;
+  }
+}
+
+// If none found, list what's in app-server for debugging
+if (!foundEntry) {
+  console.log('\nWARNING: Standard entry files not found. Listing app-server/ contents:');
+  try {
+    const entries = fs.readdirSync(appServer);
+    for (const e of entries) {
+      const stat = fs.statSync(path.join(appServer, e));
+      console.log(`  ${stat.isDirectory() ? '[DIR]  ' : '[FILE] '}${e}`);
+    }
+  } catch (e) {
+    console.error('  Could not list directory:', e.message);
+  }
   process.exit(1);
 }
 
+console.log(`\nBuild ready! Entry point: app-server/${foundEntry}`);
 console.log('Build post-process complete!');

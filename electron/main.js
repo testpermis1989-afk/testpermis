@@ -22,42 +22,46 @@ const dbDir = path.join(basePath, 'db');
   }
 });
 
+// Find server entry point file (server.js, index.js, or main.js)
+const ENTRY_FILES = ['server.js', 'index.js', 'main.js'];
+
+function findEntryFile(dir) {
+  for (const f of ENTRY_FILES) {
+    const fp = path.join(dir, f);
+    if (fs.existsSync(fp)) return f;
+  }
+  return null;
+}
+
 // Find standalone server directory
-// In packaged app: resources/app/app-server/server.js
-// In development: project-root/app-server/server.js
 function findServerDir() {
   const isPackaged = app.isPackaged;
 
   if (isPackaged) {
     // Packaged app: app-server is in resources/app/app-server/
     const appPath = app.getAppPath(); // resources/app/
-    const p1 = path.join(appPath, 'app-server');
-    if (fs.existsSync(path.join(p1, 'server.js'))) return p1;
-
-    // Fallback: try relative to __dirname (electron/)
-    const p2 = path.join(__dirname, '..', 'app-server');
-    if (fs.existsSync(path.join(p2, 'server.js'))) return p2;
-
-    // Fallback: try .next/standalone (old location)
-    const p3 = path.join(appPath, '.next', 'standalone');
-    if (fs.existsSync(path.join(p3, 'server.js'))) return p3;
-
-    console.error('[Electron] server.js NOT found in packaged app. Tried:');
-    console.error('  1. ' + p1);
-    console.error('  2. ' + p2);
-    console.error('  3. ' + p3);
+    const dirs = [
+      path.join(appPath, 'app-server'),
+      path.join(__dirname, '..', 'app-server'),
+      path.join(appPath, '.next', 'standalone'),
+    ];
+    for (const d of dirs) {
+      if (findEntryFile(d)) return { dir: d, entry: findEntryFile(d) };
+    }
+    console.error('[Electron] Server entry NOT found in packaged app. Tried:');
+    dirs.forEach((d, i) => console.error(`  ${i+1}. ${d}`));
     return null;
   } else {
     // Development: look in project root
-    const p1 = path.join(__dirname, '..', 'app-server');
-    if (fs.existsSync(path.join(p1, 'server.js'))) return p1;
-
-    const p2 = path.join(__dirname, '..', '.next', 'standalone');
-    if (fs.existsSync(path.join(p2, 'server.js'))) return p2;
-
-    console.error('[Electron] server.js NOT found in dev mode. Tried:');
-    console.error('  1. ' + p1);
-    console.error('  2. ' + p2);
+    const dirs = [
+      path.join(__dirname, '..', 'app-server'),
+      path.join(__dirname, '..', '.next', 'standalone'),
+    ];
+    for (const d of dirs) {
+      if (findEntryFile(d)) return { dir: d, entry: findEntryFile(d) };
+    }
+    console.error('[Electron] Server entry NOT found in dev mode. Tried:');
+    dirs.forEach((d, i) => console.error(`  ${i+1}. ${d}`));
     return null;
   }
 }
@@ -144,20 +148,22 @@ function startNextServer() {
     return;
   }
 
-  const serverDir = findServerDir();
-  if (!serverDir) {
+  const serverInfo = findServerDir();
+  if (!serverInfo) {
     console.error('[Electron] Standalone build not found!');
     if (mainWindow) {
       showErrorPage('Build not found',
         'The application server files are missing.\n\n' +
-        'Please run: BUILD_PORTABLE.bat\n' +
+        'Please run: BUILD.bat\n' +
         'or: npm run electron:build:portable'
       );
     }
     return;
   }
 
-  const serverJs = path.join(serverDir, 'server.js');
+  const serverDir = serverInfo.dir;
+  const serverEntry = serverInfo.entry;
+  const serverJs = path.join(serverDir, serverEntry);
   console.log(`[Electron] Server directory: ${serverDir}`);
   console.log(`[Electron] Server script: ${serverJs}`);
 
