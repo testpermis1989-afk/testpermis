@@ -16,8 +16,7 @@ const includes = [
   'package.json', 'next.config.ts', 'tsconfig.json',
   'postcss.config.mjs', 'tailwind.config.ts',
   'eslint.config.mjs', 'components.json',
-  'BUILD_PORTABLE.bat', 'INSTALLER.bat', 'UPDATE_FROM_GITHUB.bat',
-  'README_BUILD.txt',
+  'BUILD.bat',
 ];
 
 const excludePatterns = [
@@ -28,6 +27,8 @@ const excludePatterns = [
   /Caddyfile/, /chat-archive/, /TODO/, /prompt/, /test$/,
   /pyproject/, /uv\.lock/, /TestPermis_Desktop\.zip/,
   /sw\.js/, /workbox/, /manifest\.json/, /make-zip\.js/,
+  /BUILD_PORTABLE\.bat/, /INSTALLER\.bat/, /UPDATE_FROM_GITHUB\.bat/,
+  /README_BUILD\.txt/,
 ];
 
 function shouldExclude(filePath) {
