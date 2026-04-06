@@ -280,6 +280,30 @@ async function initTables(db: Database): Promise<void> {
       "createdAt" TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL
     );
+
+    CREATE TABLE IF NOT EXISTS "Activation" (
+      "id" TEXT PRIMARY KEY,
+      "activationCode" TEXT NOT NULL,
+      "machineCode" TEXT NOT NULL,
+      "machineHash" TEXT NOT NULL,
+      "durationCode" TEXT NOT NULL,
+      "durationLabel" TEXT NOT NULL,
+      "expiryDate" TEXT NOT NULL,
+      "activatedAt" TEXT NOT NULL,
+      "expiresAt" TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS "License" (
+      "id" TEXT PRIMARY KEY,
+      "machineCode" TEXT NOT NULL,
+      "activationCode" TEXT NOT NULL UNIQUE,
+      "clientName" TEXT,
+      "durationCode" TEXT NOT NULL,
+      "durationLabel" TEXT NOT NULL,
+      "durationDays" INTEGER NOT NULL,
+      "expiryDate" TEXT NOT NULL,
+      "createdAt" TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
 
@@ -639,5 +663,45 @@ export const localDb = {
       const result = await (await db.prepare('SELECT COUNT(*) as count FROM "TestResult"')).get();
       return result?.count || 0;
     },
+  },
+
+  // Activation (current device activation state)
+  activation: {
+    findFirst: async () => {
+      const db = await getDb();
+      const row = await (await db.prepare('SELECT * FROM "Activation" ORDER BY activatedAt DESC LIMIT 1')).get();
+      return (row as any) || null;
+    },
+    create: async (args: { data: any }) => {
+      const db = await getDb();
+      const id = args.data.id || cuid();
+      await (await db.prepare(
+        `INSERT INTO "Activation" (id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.activationCode, args.data.machineCode, args.data.machineHash, args.data.durationCode, args.data.durationLabel, args.data.expiryDate, args.data.activatedAt, args.data.expiresAt);
+      return { ...args.data, id };
+    },
+    deleteMany: async () => {
+      const db = await getDb();
+      await (await db.prepare('DELETE FROM "Activation"')).run();
+      return { count: 0 };
+    },
+  },
+
+  // License (admin-managed license records)
+  license: {
+    findMany: async () => {
+      const db = await getDb();
+      return (await db.prepare('SELECT * FROM "License" ORDER BY createdAt DESC')).all() as any[];
+    },
+    create: async (args: { data: any }) => {
+      const db = await getDb();
+      const id = args.data.id || cuid();
+      const now = new Date().toISOString();
+      await (await db.prepare(
+        `INSERT INTO "License" (id, machineCode, activationCode, clientName, durationCode, durationLabel, durationDays, expiryDate, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.machineCode, args.data.activationCode, args.data.clientName || null, args.data.durationCode, args.data.durationLabel, args.data.durationDays, args.data.expiryDate, now);
+      return { ...args.data, id, createdAt: now };
+    },
+    deleteMany: async () => ({ count: 0 }),
   },
 };

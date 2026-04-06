@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
+import ActivationScreen from "@/components/ActivationScreen";
+import AdminLicensePanel from "@/components/AdminLicensePanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2313,7 +2315,7 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
 };
 
 // ===== PANEL ADMIN =====
-type AdminTab = 'import' | 'series' | 'users' | 'admins';
+type AdminTab = 'import' | 'series' | 'users' | 'admins' | 'licenses';
 
 interface QuestionView {
   id: string;
@@ -3299,6 +3301,14 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           >
             🔑 Administrateurs
           </button>
+          {process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' && (
+          <button
+            onClick={() => setActiveTab('licenses')}
+            className={`px-6 py-3 font-bold transition-colors ${activeTab === 'licenses' ? 'bg-gray-600 text-yellow-400' : 'text-gray-300 hover:text-white'}`}
+          >
+            🛡️ Licences
+          </button>
+          )}
         </div>
 
         {/* Content */}
@@ -4340,6 +4350,10 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
               )}
             </div>
           )}
+          {/* Tab: Licences */}
+          {activeTab === 'licenses' && (
+            <AdminLicensePanel />
+          )}
         </div>
       </div>
 
@@ -4382,6 +4396,32 @@ export default function DrivingTestApp() {
   const [selectedChronoTime, setSelectedChronoTime] = useState<number>(15);
   const [melangeQuestions, setMelangeQuestions] = useState<QuestionData[] | null>(null);
   const [currentUser, setCurrentUser] = useState<UserData | null>(null);
+  const [isActivated, setIsActivated] = useState<boolean | null>(null); // null = checking, true = activated, false = not activated
+
+  // Check activation status on mount (desktop/local mode only)
+  useEffect(() => {
+    const isLocalMode = process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
+    if (!isLocalMode) {
+      setIsActivated(true); // Skip activation check on Vercel/cloud
+      return;
+    }
+    
+    const checkActivation = async () => {
+      try {
+        const res = await fetch('/api/license');
+        const data = await res.json();
+        setIsActivated(data.activated === true);
+      } catch {
+        // If API fails, allow access (graceful fallback)
+        setIsActivated(true);
+      }
+    };
+    checkActivation();
+  }, []);
+
+  const handleActivationSuccess = () => {
+    setIsActivated(true);
+  };
 
   const handleLogin = (user: UserData) => {
     setCurrentUser(user);
@@ -4416,6 +4456,22 @@ export default function DrivingTestApp() {
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "Arial, sans-serif" }}>
+      {/* Loading state while checking activation */}
+      {isActivated === null && (
+        <div className="fixed inset-0 bg-white flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-4 border-gray-400 border-t-gray-800 rounded-full animate-spin"></div>
+            <p className="text-gray-500 text-sm">Chargement...</p>
+          </div>
+        </div>
+      )}
+      {/* Activation screen - only in local mode */}
+      {isActivated === false && process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' && (
+        <ActivationScreen onActivated={handleActivationSuccess} />
+      )}
+      {/* Main app - only show when activated */}
+      {isActivated === true && (
+        <>
       {screen === "login" && <LoginScreen onLogin={handleLogin} onAdminLogin={handleAdminLogin} />}
       {screen === "categories" && <CategoriesScreen user={currentUser} onSelectCategory={handleSelectCategory} onLogout={handleLogout} onProfile={() => setScreen('profile')} />}
       {screen === "series" && selectedCategory && <SeriesScreen category={selectedCategory} onSelectSeries={handleSelectSeries} onMelange={handleMelange} onBack={handleGoHome} />}
@@ -4426,6 +4482,8 @@ export default function DrivingTestApp() {
       {screen === "correction" && selectedCategory && testResult && <CorrectionScreen questions={testResult.questions} userAnswers={testResult.userAnswers} onBack={() => setScreen('result')} />}
       {screen === "admin" && <AdminPanel onBack={handleLogout} />}
       {screen === "profile" && currentUser && <UserProfileScreen user={currentUser} onBack={() => setScreen('categories')} onLogout={handleLogout} />}
+        </>
+      )}
     </div>
   );
 }
