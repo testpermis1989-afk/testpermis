@@ -1,0 +1,48 @@
+{
+  "name": "permis-maroc-activation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Permis Maroc - Outil d'activation et suivi des clients",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.permis.maroc.activation",
+    "productName": "Permis Maroc - Activation",
+    "copyright": "Copyright 2025 Permis Maroc",
+    "npmRebuild": false,
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Permis Maroc Activation",
+      "artifactName": "PermisMaroc-Activation-Setup.exe",
+      "uninstallDisplayName": "Permis Maroc Activation",
+      "language": 1036
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1"
+  }
+}
