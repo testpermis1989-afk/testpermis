@@ -114,15 +114,24 @@
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": ["x64"]
         }
       ],
-      "icon": "public/icon.ico",
-      "artifactName": "PermisMaroc.exe"
+      "icon": "public/icon.ico"
     },
-    "portable": {
-      "artifactName": "PermisMaroc.exe"
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Permis Maroc",
+      "artifactName": "PermisMaroc-Setup.exe",
+      "uninstallDisplayName": "Permis Maroc",
+      "language": 1036
     }
   },
   "devDependencies": {

@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul 2>&1
-title Permis Maroc - Build
+title Permis Maroc - Build Installer
 
 echo.
 echo ============================================
-echo   PERMIS MAROC - BUILD PORTABLE .exe
+echo   PERMIS MAROC - BUILD INSTALLER
 echo ============================================
 echo.
 
@@ -32,16 +32,15 @@ echo.
 echo [3/4] copy-build...
 call node scripts/copy-build.js
 if %errorlevel% neq 0 (
-    echo ERROR: copy-build failed! server.js not found!
-    echo Make sure next.config.ts has output: "standalone"
+    echo ERROR: copy-build failed!
     pause
     exit /b 1
 )
 echo OK
 echo.
 
-echo [4/4] electron-builder...
-call npx electron-builder --win portable --x64
+echo [4/4] electron-builder (NSIS installer)...
+call npx electron-builder --win nsis --x64
 if %errorlevel% neq 0 (
     echo ERROR: electron-builder failed!
     pause
@@ -54,7 +53,10 @@ echo ============================================
 echo   BUILD COMPLETE!
 echo ============================================
 echo.
-echo EXE: %~dp0dist-electron\PermisMaroc.exe
+echo SETUP: %~dp0dist-electron\PermisMaroc-Setup.exe
+echo.
+echo Give PermisMaroc-Setup.exe to your clients.
+echo They install it like any normal app.
 echo.
 
 pause

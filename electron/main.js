@@ -154,8 +154,7 @@ function startNextServer() {
     if (mainWindow) {
       showErrorPage('Build not found',
         'The application server files are missing.\n\n' +
-        'Please run: BUILD.bat\n' +
-        'or: npm run electron:build:portable'
+        'Please run: BUILD.bat'
       );
     }
     return;
@@ -225,11 +224,7 @@ function startNextServer() {
     if (mainWindow) {
       showErrorPage('Startup Error',
         `Server failed to start after 60 seconds.\n\n` +
-        `Try running manually:\n` +
-        `set NEXT_PUBLIC_STORAGE_MODE=local\n` +
-        `npx next build\n` +
-        `node scripts/copy-build.js\n` +
-        `npx electron-builder --win portable --x64`
+        `Please reinstall: PermisMaroc-Setup.exe`
       );
     }
   });
