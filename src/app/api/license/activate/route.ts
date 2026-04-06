@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getMachineHash } from '@/lib/machine-id';
-import { validateActivationCode } from '@/lib/license-crypto';
+import { getMachineCode, getMachineHash } from '@/lib/machine-id';
+import { verifyActivationCode } from '@/lib/activation';
 
 /**
  * POST /api/license/activate
  * Validate an activation code against this machine and store the activation.
+ * Uses the same format as the standalone activation tool.
  *
  * Body: { activationCode: string }
  */
@@ -21,39 +22,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get the raw machine hash for validation
+    // Get the machine code for validation
+    const machineCode = getMachineCode();
     const machineHash = getMachineHash();
 
-    // Validate the activation code against this machine
-    const result = validateActivationCode(activationCode, machineHash);
+    // Validate the activation code against this machine (same format as activation tool)
+    const result = verifyActivationCode(activationCode, machineCode);
 
     if (!result.valid) {
       return NextResponse.json(
-        { error: result.error || 'Invalid activation code' },
+        { error: result.error || 'Code invalide' },
         { status: 400 }
       );
     }
 
-    // Clear any previous activation (single-device, single-license model)
-    await db.activation.deleteMany();
+    const expiryDate = result.expiresAt!.toISOString();
+
+    // Clear any previous activation
+    try {
+      await db.activation.deleteMany();
+    } catch {
+      // Table may not exist yet
+    }
 
     // Store the new activation record
     await db.activation.create({
       data: {
         activationCode,
-        machineCode: activationCode.replace(/-/g, '').substring(0, 8).toUpperCase(),
+        machineCode,
         machineHash,
-        durationCode: result.durationCode || '',
+        durationCode: String(result.durationDays || 30),
         durationLabel: result.durationLabel || '',
-        expiryDate: result.expiryDate || '',
+        expiryDate,
         activatedAt: new Date().toISOString(),
-        expiresAt: result.expiryDate || '',
+        expiresAt: expiryDate,
       },
     });
 
     return NextResponse.json({
       success: true,
-      expiryDate: result.expiryDate,
+      expiryDate,
       durationLabel: result.durationLabel,
     });
   } catch (error) {

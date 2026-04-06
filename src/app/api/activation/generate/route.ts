@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import {
   generateActivationCode,
   LICENSE_DURATIONS,
-  getDurationLabel,
+  getDurationCode,
 } from '@/lib/activation';
 
 export async function POST(request: Request) {
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { machineCode, durationDays, clientName } = body;
+    const { machineCode, durationCode, clientName } = body;
 
     // Validate machine code
     if (!machineCode || typeof machineCode !== 'string') {
@@ -24,45 +24,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate duration
-    const validDurations = LICENSE_DURATIONS.map((d) => d.days);
-    if (!durationDays || !validDurations.includes(durationDays)) {
+    // Validate duration code
+    const validCodes = LICENSE_DURATIONS.map((d) => d.code);
+    if (!durationCode || !validCodes.includes(durationCode)) {
       return NextResponse.json(
-        {
-          error: `Invalid duration. Must be one of: ${validDurations.join(', ')}`,
-        },
+        { error: `Invalid duration. Must be one of: ${validCodes.join(', ')}` },
         { status: 400 }
       );
     }
 
     // Generate the activation code
-    const activationCode = generateActivationCode(machineCode, durationDays);
-
-    // Calculate expiry date
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + durationDays);
+    const result = generateActivationCode(machineCode, durationCode);
 
     // Save to License table
     const license = await db.license.create({
       data: {
         machineCode,
-        activationCode,
-        durationDays,
-        durationLabel: getDurationLabel(durationDays),
+        activationCode: result.code,
+        durationCode: result.durationLabel,
+        durationLabel: result.durationLabel,
         clientName: clientName || null,
-        expiresAt,
+        expiresAt: new Date(result.expiryDate),
         createdAt: new Date(),
       },
     });
 
     return NextResponse.json({
       success: true,
-      activationCode,
+      activationCode: result.code,
+      durationLabel: result.durationLabel,
+      expiryDate: result.expiryDate,
       license: {
         id: license.id,
         machineCode: license.machineCode,
-        durationDays: license.durationDays,
-        durationLabel: license.durationLabel,
+        activationCode: result.code,
+        durationLabel: result.durationLabel,
         clientName: license.clientName,
         expiresAt: license.expiresAt,
       },

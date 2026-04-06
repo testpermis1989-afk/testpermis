@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import {
-  generateActivationCode,
-  DURATION_OPTIONS,
-  type LicenseDuration,
-} from '@/lib/license-crypto';
+import { generateActivationCode, LICENSE_DURATIONS } from '@/lib/activation';
 
 /**
  * GET /api/admin/license
@@ -26,15 +22,16 @@ export async function GET() {
 /**
  * POST /api/admin/license
  * Generate a new activation code for a given machine code and duration.
+ * Uses the same format as the standalone activation tool.
  *
  * Body: { machineCode: string, duration: string, clientName?: string }
+ * duration values: "30d", "90d", "6mo", "1yr", "unlimited"
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { machineCode, duration, clientName } = body;
 
-    // Validate machine code
     if (!machineCode || typeof machineCode !== 'string') {
       return NextResponse.json(
         { error: 'Machine code is required' },
@@ -42,33 +39,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate duration
-    if (!duration || typeof duration !== 'string') {
+    // Validate duration code
+    const validCodes = LICENSE_DURATIONS.map((d) => d.code);
+    if (!duration || !validCodes.includes(duration)) {
       return NextResponse.json(
-        { error: 'Duration is required' },
+        { error: `Invalid duration. Must be one of: ${validCodes.join(', ')}` },
         { status: 400 }
       );
     }
 
-    const durationOption = DURATION_OPTIONS.find(
-      (d) => d.value === duration
-    );
-    if (!durationOption) {
-      return NextResponse.json(
-        {
-          error: `Invalid duration. Must be one of: ${DURATION_OPTIONS.map((d) => d.value).join(', ')}`,
-        },
-        { status: 400 }
-      );
-    }
+    // Generate the activation code (same format as activation tool)
+    const result = generateActivationCode(machineCode, duration);
 
-    // Generate the activation code
-    const result = generateActivationCode(
-      machineCode,
-      duration as LicenseDuration
-    );
-
-    // Persist the license record in the database
+    // Persist the license record
     await db.license.create({
       data: {
         machineCode,
@@ -76,7 +59,7 @@ export async function POST(request: NextRequest) {
         clientName: clientName || null,
         durationCode: duration,
         durationLabel: result.durationLabel,
-        durationDays: durationOption.days,
+        durationDays: result.durationDays,
         expiryDate: result.expiryDate,
       },
     });

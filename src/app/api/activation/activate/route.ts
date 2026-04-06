@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getMachineCode, getMachineHash } from '@/lib/machine-id';
-import { verifyActivationCode, getDurationLabel } from '@/lib/activation';
+import { verifyActivationCode } from '@/lib/activation';
 
 export async function POST(request: Request) {
   try {
@@ -38,7 +38,6 @@ export async function POST(request: Request) {
     const expiryDate = result.expiresAt!.toISOString();
 
     // Upsert the activation record
-    // First, delete any existing activation
     try {
       const existing = await db.activation.findFirst();
       if (existing) {
@@ -55,7 +54,7 @@ export async function POST(request: Request) {
         machineHash,
         activationCode: code,
         durationCode: String(durationDays),
-        durationLabel: getDurationLabel(durationDays),
+        durationLabel: result.durationLabel || `${durationDays} jours`,
         expiryDate,
         activatedAt: new Date().toISOString(),
         expiresAt: expiryDate,
@@ -66,7 +65,7 @@ export async function POST(request: Request) {
       success: true,
       message: 'Activation successful',
       expiryDate,
-      durationLabel: getDurationLabel(durationDays),
+      durationLabel: result.durationLabel || `${durationDays} jours`,
     });
   } catch (error) {
     console.error('Activation failed:', error);
