@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import ActivationScreen from "@/components/ActivationScreen";
-import AdminLicensePanel from "@/components/AdminLicensePanel";
+// AdminLicensePanel removed - activation is handled by the separate activation tool
 import {
   AlertDialog,
   AlertDialogAction,
@@ -126,22 +126,7 @@ const LoginScreen = ({ onLogin, onAdminLogin }: { onLogin: (user: UserData) => v
             {loading ? 'Connexion...' : 'Se connecter / تسجيل الدخول'}
           </button>
 
-          {/* Download Desktop App Button */}
-          <div className="mt-4 pt-3 border-t border-gray-200">
-            <a
-              href="/api/download"
-              download="TestPermis_Desktop.zip"
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 to-green-600 text-white py-3 rounded-lg font-bold text-lg hover:from-green-600 hover:to-green-700 shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              <div className="text-left">
-                <div className="text-sm">Desktop Windows (5.9 MB)</div>
-                <div className="text-xs opacity-90">Télécharger / تحميل تطبيق</div>
-              </div>
-            </a>
-          </div>
+
 
         </div>
       </div>
@@ -2332,7 +2317,7 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
 };
 
 // ===== PANEL ADMIN =====
-type AdminTab = 'import' | 'series' | 'users' | 'admins' | 'licenses';
+type AdminTab = 'import' | 'series' | 'users' | 'admins';
 
 interface QuestionView {
   id: string;
@@ -3318,14 +3303,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           >
             🔑 Administrateurs
           </button>
-          {process.env.NEXT_PUBLIC_STORAGE_MODE === 'local' && (
-          <button
-            onClick={() => setActiveTab('licenses')}
-            className={`px-6 py-3 font-bold transition-colors ${activeTab === 'licenses' ? 'bg-gray-600 text-yellow-400' : 'text-gray-300 hover:text-white'}`}
-          >
-            🛡️ Licences
-          </button>
-          )}
+
         </div>
 
         {/* Content */}
@@ -4367,10 +4345,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
               )}
             </div>
           )}
-          {/* Tab: Licences */}
-          {activeTab === 'licenses' && (
-            <AdminLicensePanel />
-          )}
+
         </div>
       </div>
 

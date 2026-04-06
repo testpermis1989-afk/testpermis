@@ -44,6 +44,7 @@ function getMachineCode() {
 // =====================================================
 const DATA_DIR = path.join(path.dirname(app.getPath('exe')), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'activations.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -66,6 +67,31 @@ function loadData() {
 function saveData(data) {
   ensureDataDir();
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+// =====================================================
+// ADMIN PASSWORD MANAGEMENT
+// =====================================================
+function getDefaultConfig() {
+  return { adminPassword: 'admin123' };
+}
+
+function loadConfig() {
+  ensureDataDir();
+  if (!fs.existsSync(CONFIG_FILE)) {
+    saveConfig(getDefaultConfig());
+    return getDefaultConfig();
+  }
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+  } catch {
+    return getDefaultConfig();
+  }
+}
+
+function saveConfig(config) {
+  ensureDataDir();
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
 }
 
 // =====================================================
@@ -208,10 +234,28 @@ ipcMain.handle('get-machine-info', () => {
 
 // Admin login
 ipcMain.handle('admin-login', (event, password) => {
-  if (password === 'admin123') {
+  const config = loadConfig();
+  if (password === config.adminPassword) {
     return { success: true };
   }
   return { success: false, error: 'Mot de passe incorrect' };
+});
+
+// Change admin password
+ipcMain.handle('change-admin-password', (event, oldPassword, newPassword) => {
+  if (!oldPassword || !newPassword) {
+    return { success: false, error: 'Remplissez tous les champs' };
+  }
+  if (newPassword.length < 4) {
+    return { success: false, error: 'Le nouveau mot de passe doit avoir au moins 4 caracteres' };
+  }
+  const config = loadConfig();
+  if (oldPassword !== config.adminPassword) {
+    return { success: false, error: 'Ancien mot de passe incorrect' };
+  }
+  config.adminPassword = newPassword;
+  saveConfig(config);
+  return { success: true, message: 'Mot de passe modifie avec succes' };
 });
 
 // Generate activation code (admin)
@@ -219,6 +263,8 @@ ipcMain.handle('admin-login', (event, password) => {
 ipcMain.handle('generate-code', (event, machineCode, durationCode) => {
   const result = generateActivationCode(machineCode, durationCode);
   const data = loadData();
+
+  // Add to licenses table
   data.licenses.push({
     activationCode: result.code,
     machineCode,
@@ -228,6 +274,19 @@ ipcMain.handle('generate-code', (event, machineCode, durationCode) => {
     clientName: '',
     createdAt: new Date().toISOString(),
   });
+
+  // ALSO add to activations table so admin can track all active licenses
+  // Remove any existing activation for this machine first
+  data.activations = data.activations.filter(a => a.machineCode !== machineCode);
+  data.activations.push({
+    activationCode: result.code,
+    machineCode,
+    durationCode: result.durationCode,
+    durationLabel: result.durationLabel,
+    expiryDate: result.expiryDate,
+    activatedAt: new Date().toISOString(),
+  });
+
   saveData(data);
   return { success: true, ...result };
 });

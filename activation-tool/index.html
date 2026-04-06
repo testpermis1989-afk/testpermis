@@ -231,6 +231,7 @@
                 <th>Expiration</th>
                 <th>Date Activation</th>
                 <th>Statut</th>
+                <th>Supprimer</th>
               </tr>
             </thead>
             <tbody id="activationsTableBody">
@@ -241,6 +242,23 @@
           <div class="icon">&#x1F4E6;</div>
           <p>Aucune activation</p>
         </div>
+      </div>
+
+      <!-- Change Admin Password -->
+      <div class="card">
+        <h2>&#x1F510; Modifier le mot de passe admin</h2>
+        <div id="passwordAlert"></div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Ancien mot de passe</label>
+            <input type="password" id="oldPasswordInput" placeholder="Ancien mot de passe...">
+          </div>
+          <div class="form-group">
+            <label>Nouveau mot de passe</label>
+            <input type="password" id="newPasswordInput" placeholder="Nouveau mot de passe..." onkeydown="if(event.key==='Enter')doChangePassword()">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="doChangePassword()">&#x1F504; Modifier le mot de passe</button>
       </div>
 
     </div>
@@ -473,6 +491,7 @@
             <td>${a.expiryDate}</td>
             <td>${new Date(a.activatedAt).toLocaleString('fr-FR')}</td>
             <td>${statusBadge}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteActivation('${a.activationCode}')">&#x1F5D1;</button></td>
           </tr>`;
         }).join('');
       }
@@ -482,6 +501,34 @@
       if (!confirm('Supprimer cette license?')) return;
       await window.api.deleteLicense(code);
       await refreshAdminData();
+    }
+
+    async function deleteActivation(code) {
+      if (!confirm('Supprimer cette activation?')) return;
+      await window.api.deleteLicense(code);
+      await refreshAdminData();
+    }
+
+    // =====================================================
+    // CHANGE PASSWORD
+    // =====================================================
+    async function doChangePassword() {
+      const oldPassword = document.getElementById('oldPasswordInput').value;
+      const newPassword = document.getElementById('newPasswordInput').value;
+
+      if (!oldPassword || !newPassword) {
+        showAlert('passwordAlert', 'Remplissez tous les champs', 'error');
+        return;
+      }
+
+      const result = await window.api.changeAdminPassword(oldPassword, newPassword);
+      if (result.success) {
+        showAlert('passwordAlert', 'Mot de passe modifie avec succes!', 'success');
+        document.getElementById('oldPasswordInput').value = '';
+        document.getElementById('newPasswordInput').value = '';
+      } else {
+        showAlert('passwordAlert', result.error, 'error');
+      }
     }
 
     // =====================================================
