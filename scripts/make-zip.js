@@ -22,7 +22,7 @@ const includes = [
 const excludePatterns = [
   /node_modules/, /\.next/, /dist-electron/, /app-server/, /download/,
   /\.git/, /\.env/, /\.db$/, /dev\.log/, /server\.log/, /skills/,
-  /mini-services/, /examples/, /data/, /upload/, /bun\.lock/,
+  /mini-services/, /examples/, /data/, /\/upload\//, /bun\.lock/,
   /\.claude/, /\.z-ai-config/, /self-heal/, /run-dev/, /dev\.sh/,
   /Caddyfile/, /chat-archive/, /TODO/, /prompt/, /test$/,
   /pyproject/, /uv\.lock/, /TestPermis_Desktop\.zip/,
