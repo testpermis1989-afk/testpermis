@@ -39,10 +39,6 @@ function getMachineCode() {
   return `${code.slice(0, 4)}-${code.slice(4, 8)}-${code.slice(8, 12)}-${code.slice(12, 16)}`;
 }
 
-function getMachineHash() {
-  return getMachineFingerprint();
-}
-
 // =====================================================
 // DATA STORAGE (JSON file)
 // =====================================================
@@ -74,6 +70,8 @@ function saveData(data) {
 
 // =====================================================
 // ACTIVATION CODE GENERATION & VALIDATION
+// Both use the machine CODE (XXXX-XXXX-XXXX-XXXX)
+// so admin and client use the SAME value
 // =====================================================
 const DURATIONS = {
   '30d': 30,
@@ -91,7 +89,8 @@ const DURATION_LABELS = {
   'unlimited': 'Illimitee',
 };
 
-function generateActivationCode(machineHash, durationCode) {
+function generateActivationCode(machineCode, durationCode) {
+  // machineCode format: XXXX-XXXX-XXXX-XXXX (16 chars uppercase)
   const secret = 'PERMIS_MAROC_2025_SECRET_KEY';
   const days = DURATIONS[durationCode] || 30;
   const label = DURATION_LABELS[durationCode] || '30 jours';
@@ -101,14 +100,15 @@ function generateActivationCode(machineHash, durationCode) {
     ? '2099-12-31'
     : new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-  const payload = `${machineHash}|${durationCode}|${expiryDate}|${secret}`;
+  // Use machineCode (not hash) for signature - both admin and client have this value
+  const payload = `${machineCode}|${durationCode}|${expiryDate}|${secret}`;
   const signature = crypto.createHash('sha256').update(payload).digest('hex').substring(0, 8).toUpperCase();
 
   const code = `${signature}-${durationCode.toUpperCase()}-${expiryDate.replace(/-/g, '').substring(2)}`;
   return { code, durationLabel: label, durationCode, expiryDate };
 }
 
-function validateActivationCode(code, machineHash) {
+function validateActivationCode(code, machineCode) {
   try {
     const parts = code.split('-');
     if (parts.length < 3) return { valid: false, error: 'Format invalide' };
@@ -117,8 +117,8 @@ function validateActivationCode(code, machineHash) {
     const durationCode = parts[1].toLowerCase();
     if (!DURATIONS[durationCode]) return { valid: false, error: 'Code invalide' };
 
-    // Regenerate expected code
-    const expected = generateActivationCode(machineHash, durationCode);
+    // Regenerate expected code using this machine's code
+    const expected = generateActivationCode(machineCode, durationCode);
 
     if (expected.code === code) {
       // Check expiry
@@ -147,7 +147,6 @@ function validateActivationCode(code, machineHash) {
 ipcMain.handle('get-machine-info', () => {
   return {
     machineCode: getMachineCode(),
-    machineHash: getMachineHash(),
     hostname: os.hostname(),
     platform: os.platform(),
     arch: os.arch(),
@@ -162,14 +161,14 @@ ipcMain.handle('admin-login', (event, password) => {
   return { success: false, error: 'Mot de passe incorrect' };
 });
 
-// Generate activation code
-ipcMain.handle('generate-code', (event, machineCode, machineHash, durationCode) => {
-  const result = generateActivationCode(machineHash, durationCode);
+// Generate activation code (admin)
+// machineCode is what the admin enters (the client's machine code)
+ipcMain.handle('generate-code', (event, machineCode, durationCode) => {
+  const result = generateActivationCode(machineCode, durationCode);
   const data = loadData();
   data.licenses.push({
     activationCode: result.code,
     machineCode,
-    machineHash,
     durationCode: result.durationCode,
     durationLabel: result.durationLabel,
     expiryDate: result.expiryDate,
@@ -180,11 +179,10 @@ ipcMain.handle('generate-code', (event, machineCode, machineHash, durationCode) 
   return { success: true, ...result };
 });
 
-// Activate machine
+// Activate machine (client)
 ipcMain.handle('activate', (event, activationCode) => {
-  const machineHash = getMachineHash();
-  const machineCode = getMachineCode();
-  const result = validateActivationCode(activationCode, machineHash);
+  const machineCode = getMachineCode(); // This machine's code
+  const result = validateActivationCode(activationCode, machineCode);
 
   if (!result.valid) {
     return { success: false, error: result.error };
@@ -193,13 +191,12 @@ ipcMain.handle('activate', (event, activationCode) => {
   const data = loadData();
 
   // Remove old activation for this machine
-  data.activations = data.activations.filter(a => a.machineHash !== machineHash);
+  data.activations = data.activations.filter(a => a.machineCode !== machineCode);
 
   // Add new activation
   data.activations.push({
     activationCode,
     machineCode,
-    machineHash,
     durationCode: result.durationCode,
     durationLabel: result.durationLabel,
     expiryDate: result.expiryDate,
@@ -217,9 +214,9 @@ ipcMain.handle('get-activations', () => {
 
 // Get activation status
 ipcMain.handle('get-status', () => {
-  const machineHash = getMachineHash();
+  const machineCode = getMachineCode();
   const data = loadData();
-  const activation = data.activations.find(a => a.machineHash === machineHash);
+  const activation = data.activations.find(a => a.machineCode === machineCode);
   if (!activation) {
     return { activated: false, machineCode: getMachineCode() };
   }

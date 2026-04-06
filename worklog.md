@@ -119,3 +119,29 @@ Stage Summary:
 - Next.js 16 with Turbopack standalone DOES generate server.js correctly
 - All other build pipeline scripts (copy-build.js, electron/main.js) work correctly as-is
 - User just needs to `git pull` and re-run BUILD.bat
+
+---
+Task ID: 6
+Agent: main
+Task: Fix activation tool "Code invalide pour cette machine" error
+
+Work Log:
+- User reported: activation tool shows "Code invalide pour cette machine" when trying to activate
+- Analyzed screenshot: user entered code DDC373A5-UNLIMITED-991231 for machine 999F-560A-91BA-D5D0
+- Root cause found: MISMATCH between code generation and validation hash
+  - Admin generates code: frontend converts machine code to "fake hash" (16 chars + 48 zeros padding)
+  - Client validates code: backend uses REAL machine hash (full 64-char SHA256 of hostname|platform|arch|cpu|mac)
+  - These two hashes are completely different, so the signature never matches
+- Fix: Changed both generateActivationCode() and validateActivationCode() to use the machine CODE (XXXX-XXXX-XXXX-XXXX) directly instead of the full hash
+  - Admin generates: signature based on machineCode (e.g. "999F-560A-91BA-D5D0")
+  - Client validates: signature regenerated from same machineCode
+  - Now both sides use identical input → signatures match
+- Updated files:
+  - activation-tool/main.js: Simplified to use machineCode everywhere, removed machineHash dependency
+  - activation-tool/preload.js: Removed machineHash from generateCode params
+  - activation-tool/index.html: Removed fakeHash conversion in doGenerateCode()
+
+Stage Summary:
+- **ROOT CAUSE**: Admin used fakeHash (padded machine code) while client used real machine fingerprint hash → signature mismatch
+- **FIX**: Both generation and validation now use the displayable machine code (XXXX-XXXX-XXXX-XXXX)
+- User needs to rebuild activation tool: run BUILD.bat in activation-tool/ folder on Windows

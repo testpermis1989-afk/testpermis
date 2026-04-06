@@ -404,10 +404,7 @@
       }
 
       // Convert machineCode to hash (same algorithm as Electron main)
-      const hash = machineCode.replace(/-/g, '').toLowerCase();
-      const fakeHash = hash.padEnd(64, '0');
-
-      const result = await window.api.generateCode(machineCode, fakeHash, durationCode);
+      const result = await window.api.generateCode(machineCode, durationCode);
       if (result.success) {
         lastGeneratedCode = result.code;
         document.getElementById('generatedCodeDisplay').textContent = result.code;
