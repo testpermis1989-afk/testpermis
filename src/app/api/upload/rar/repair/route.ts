@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import sharp from 'sharp';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, getUploadJob, saveUploadJob, hasUploadJob } from '@/lib/upload-store';
+
+// Lazy load sharp - optional, may not work in Electron's Node.js ABI
+let sharpModule: typeof import('sharp') | null = null;
+function getSharp() {
+  if (!sharpModule) {
+    try { sharpModule = require('sharp'); } catch (e) {
+      console.warn('[sharp] Module not available:', (e as Error).message);
+    }
+  }
+  return sharpModule;
+}
 
 // POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP
 // Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
@@ -78,6 +88,11 @@ export async function POST(request: NextRequest) {
           }
 
           // Try to repair with sharp
+          const sharp = getSharp();
+          if (!sharp) {
+            report.removed.push(`${baseName} — Image irréparable (sharp non disponible)`);
+            continue;
+          }
           try {
             const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })

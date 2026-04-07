@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import sharp from 'sharp';
 import { db } from '@/lib/db';
 import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
+
+// Lazy load sharp - optional, may not work in Electron's Node.js ABI
+let sharpModule: typeof import('sharp') | null = null;
+function getSharp() {
+  if (!sharpModule) {
+    try { sharpModule = require('sharp'); } catch (e) {
+      console.warn('[sharp] Module not available:', (e as Error).message);
+    }
+  }
+  return sharpModule;
+}
 
 // GET /api/admin/compress - Get file stats for a serie from Supabase Storage
 export async function GET(request: NextRequest) {
@@ -87,6 +97,8 @@ export async function POST(request: NextRequest) {
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.webp');
 
+          const sharp = getSharp();
+          if (!sharp) continue; // Skip if sharp not available
           try {
             // Sharp with Buffers - no filesystem needed!
             const outputBuffer = await sharp(fileData)
@@ -130,6 +142,8 @@ export async function POST(request: NextRequest) {
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.webp');
 
+          const sharp = getSharp();
+          if (!sharp) continue; // Skip if sharp not available
           try {
             const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })

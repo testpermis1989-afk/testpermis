@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import sharp from 'sharp';
 import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
+
+// Lazy load sharp - optional, may not work in Electron's Node.js ABI
+let sharpModule: typeof import('sharp') | null = null;
+function getSharp() {
+  if (!sharpModule) {
+    try { sharpModule = require('sharp'); } catch (e) {
+      console.warn('[sharp] Module not available:', (e as Error).message);
+    }
+  }
+  return sharpModule;
+}
 
 // POST /api/series/repair - Réparer les fichiers corrompus d'une série existante (from Supabase Storage)
 // Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
@@ -36,6 +46,14 @@ export async function POST(request: NextRequest) {
           if (isValidImage(fileData)) continue; // Déjà valide
 
           // Réparer avec sharp (Buffer-based, no filesystem!)
+          const sharp = getSharp();
+          if (!sharp) {
+            try {
+              await supabase.storage.from('uploads').remove([imgStoragePath]);
+            } catch {}
+            report.removed.push(`images/${img}`);
+            continue;
+          }
           try {
             const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
@@ -85,6 +103,14 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(respStoragePath);
           if (isValidImage(fileData)) continue;
 
+          const sharp = getSharp();
+          if (!sharp) {
+            try {
+              await supabase.storage.from('uploads').remove([respStoragePath]);
+            } catch {}
+            report.removed.push(`responses/${resp}`);
+            continue;
+          }
           try {
             const outputBuffer = await sharp(fileData)
               .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })

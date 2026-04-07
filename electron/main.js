@@ -7,6 +7,9 @@ const http = require('http');
 let mainWindow;
 let nextProcess;
 let serverReady = false;
+let serverStderr = []; // Capture stderr for error display
+let serverStdout = []; // Capture stdout for diagnostics
+let serverCrashed = false;
 
 // Data directory - stored alongside the exe (portable mode)
 const basePath = path.dirname(app.getPath('exe'));
@@ -72,6 +75,10 @@ function waitForServer(port, maxRetries = 60) {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const check = () => {
+      if (serverCrashed) {
+        reject(new Error('Server process crashed'));
+        return;
+      }
       const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
         resolve(true);
       });
@@ -153,9 +160,12 @@ function startNextServer() {
   if (!serverInfo) {
     console.error('[Electron] Standalone build not found!');
     if (mainWindow) {
+      const resourcesPath = process.resourcesPath;
       showErrorPage('Build not found',
-        'The application server files are missing.\n\n' +
-        'Please run: BUILD.bat'
+        `Server files not found.\n\n` +
+        `Resources path: ${resourcesPath}\n` +
+        `Checked: ${resourcesPath}/app-server/\n\n` +
+        `Please reinstall: PermisMaroc-Setup.exe`
       );
     }
     return;
@@ -166,6 +176,25 @@ function startNextServer() {
   const serverJs = path.join(serverDir, serverEntry);
   console.log(`[Electron] Server directory: ${serverDir}`);
   console.log(`[Electron] Server script: ${serverJs}`);
+  console.log(`[Electron] resourcesPath: ${process.resourcesPath}`);
+  console.log(`[Electron] app.isPackaged: ${app.isPackaged}`);
+
+  // Verify the server script exists and is readable
+  if (!fs.existsSync(serverJs)) {
+    const errMsg = `Server script not found: ${serverJs}`;
+    console.error(`[Electron] ${errMsg}`);
+    showErrorPage('File Not Found', errMsg);
+    return;
+  }
+
+  // Verify node_modules exists
+  const nmDir = path.join(serverDir, 'node_modules');
+  if (!fs.existsSync(nmDir)) {
+    const errMsg = `node_modules not found at: ${nmDir}\n\nThe app-server directory is incomplete.`;
+    console.error(`[Electron] ${errMsg}`);
+    showErrorPage('Missing Dependencies', errMsg);
+    return;
+  }
 
   // Use ELECTRON_RUN_AS_NODE=1 to make Electron act as Node.js
   const electronExe = process.execPath;
@@ -185,6 +214,11 @@ function startNextServer() {
   console.log(`[Electron] Data dir: ${dataDir}`);
   console.log(`[Electron] DB path: ${path.join(dbDir, 'permis.db')}`);
 
+  // Reset capture buffers
+  serverStderr = [];
+  serverStdout = [];
+  serverCrashed = false;
+
   nextProcess = spawn(electronExe, [serverJs], {
     cwd: serverDir,
     env,
@@ -196,22 +230,45 @@ function startNextServer() {
   nextProcess.stdout.on('data', (data) => {
     const msg = data.toString().trim();
     console.log(`[Next.js] ${msg}`);
+    serverStdout.push(msg);
   });
 
   nextProcess.stderr.on('data', (data) => {
     const msg = data.toString().trim();
     console.error(`[Next.js:ERR] ${msg}`);
+    serverStderr.push(msg);
   });
 
   nextProcess.on('error', (err) => {
-    console.error(`[Electron] Failed to start server: ${err.message}`);
+    const errMsg = `Failed to start process: ${err.message}`;
+    console.error(`[Electron] ${errMsg}`);
+    serverCrashed = true;
     if (mainWindow) {
-      showErrorPage('Server Error', `Failed to start: ${err.message}`);
+      showErrorPage('Server Error', errMsg);
     }
   });
 
   nextProcess.on('close', (code, signal) => {
-    console.log(`[Next.js] Process exited with code ${code}`);
+    console.log(`[Next.js] Process exited with code ${code}, signal ${signal}`);
+    if (code !== 0 && code !== null) {
+      serverCrashed = true;
+      console.error(`[Electron] Server crashed with exit code ${code}`);
+      // If server crashes before becoming ready, show error immediately
+      if (!serverReady && mainWindow) {
+        const errOutput = serverStderr.join('\n').slice(-2000);
+        const outOutput = serverStdout.join('\n').slice(-1000);
+        showErrorPage('Server Crash',
+          `The server process exited unexpectedly (code: ${code}).\n\n` +
+          `--- Server Output ---\n${outOutput || '(no output)'}\n\n` +
+          `--- Error Output ---\n${errOutput || '(no errors)'}\n\n` +
+          `--- Diagnostics ---\n` +
+          `CWD: ${serverDir}\n` +
+          `Script: ${serverJs}\n` +
+          `Electron: ${electronExe}\n` +
+          `Node version: ${process.versions.node}`
+        );
+      }
+    }
     serverReady = false;
   });
 
@@ -222,9 +279,18 @@ function startNextServer() {
     loadAppUrl(PORT);
   }).catch((err) => {
     console.error(`[Electron] Server failed: ${err.message}`);
-    if (mainWindow) {
+    if (mainWindow && !serverCrashed) {
+      const errOutput = serverStderr.join('\n').slice(-2000);
+      const outOutput = serverStdout.join('\n').slice(-1000);
       showErrorPage('Startup Error',
         `Server failed to start after 60 seconds.\n\n` +
+        `--- Server Output ---\n${outOutput || '(no output)'}\n\n` +
+        `--- Error Output ---\n${errOutput || '(no errors)'}\n\n` +
+        `--- Diagnostics ---\n` +
+        `CWD: ${serverDir}\n` +
+        `Script: ${serverJs}\n` +
+        `Resources: ${process.resourcesPath}\n` +
+        `Node version: ${process.versions.node}\n\n` +
         `Please reinstall: PermisMaroc-Setup.exe`
       );
     }
@@ -239,6 +305,17 @@ function loadAppUrl(port) {
 
 function showErrorPage(title, message) {
   if (mainWindow) {
+    // Escape message for HTML
+    const escapedMessage = message
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const escapedTitle = title
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
     mainWindow.loadURL(`data:text/html,${encodeURIComponent(`
       <!DOCTYPE html>
       <html>
@@ -247,17 +324,19 @@ function showErrorPage(title, message) {
         <title>Error</title>
         <style>
           body { font-family: 'Segoe UI', Arial, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f5; color: #333; }
-          .container { text-align: center; padding: 40px; max-width: 500px; }
-          h1 { color: #e74c3c; margin-bottom: 20px; }
-          p { color: #666; line-height: 1.6; white-space: pre-line; }
+          .container { text-align: center; padding: 40px; max-width: 700px; width: 100%; }
+          h1 { color: #e74c3c; margin-bottom: 20px; font-size: 24px; }
+          .error-box { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; text-align: left; max-height: 60vh; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.5; color: #555; white-space: pre-wrap; word-break: break-all; }
           .icon { font-size: 64px; margin-bottom: 20px; }
+          .footer { margin-top: 20px; color: #999; font-size: 14px; }
         </style>
       </head>
       <body>
         <div class="container">
           <div class="icon">⚠️</div>
-          <h1>${title}</h1>
-          <p>${message}</p>
+          <h1>${escapedTitle}</h1>
+          <div class="error-box">${escapedMessage}</div>
+          <div class="footer">Permis Maroc v1.0</div>
         </div>
       </body>
       </html>
