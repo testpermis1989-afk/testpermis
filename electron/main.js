@@ -38,14 +38,13 @@ function findServerDir() {
   const isPackaged = app.isPackaged;
 
   if (isPackaged) {
-    // Packaged app: app-server is in resources/app/app-server/
-    // When asar is enabled, app.getAppPath() returns the asar path
-    const appPath = app.getAppPath();
+    // Packaged app: app-server is placed in resources/app-server/ via extraResources
+    // This is OUTSIDE the asar so it's a real filesystem directory (needed for spawn cwd)
+    const resourcesPath = process.resourcesPath;
     const dirs = [
-      path.join(appPath, 'app-server'),
-      path.join(__dirname, '..', 'app-server'),
-      path.join(path.dirname(process.execPath), 'resources', 'app', 'app-server'),
-      path.join(appPath, '.next', 'standalone'),
+      path.join(resourcesPath, 'app-server'),
+      path.join(__dirname, '..', 'resources', 'app-server'),
+      path.join(path.dirname(process.execPath), 'resources', 'app-server'),
     ];
     for (const d of dirs) {
       if (findEntryFile(d)) return { dir: d, entry: findEntryFile(d) };

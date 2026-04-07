@@ -217,3 +217,24 @@ Stage Summary:
 - Single "📥 Vérifier et Importer" button handles everything: verify + compress + import
 - Images are automatically compressed during import (sharp, max 1024px, optimized quality)
 - Compression stats shown in result message (images compressed, bytes saved)
+
+---
+Task ID: 1
+Agent: main
+Task: Fix ENOENT error on app launch - asar path used as spawn cwd
+
+Work Log:
+- Analyzed error screenshot: "Failed to start: spawn C:\Users\HP\AppData\Local\Programs\Permis Maroc\Permis Maroc.exe ENOENT"
+- Root cause: With `asar: true`, `app-server/` was packed into `.asar` archive (virtual filesystem)
+- `findServerDir()` returned asar path (e.g., `resources/app.asar/app-server/`)
+- `spawn(electronExe, [serverJs], { cwd: serverDir })` failed because asar paths cannot be used as real `cwd` directories
+- Fix: Moved `app-server/` from `files` array to `extraResources` in package.json build config
+- Updated `findServerDir()` in `electron/main.js` to use `process.resourcesPath` instead of `app.getAppPath()`
+- Simplified `asarUnpack` to only `**/*.node` and `**/*.wasm` (sharp/sql.js now live outside asar)
+- With `extraResources`, `app-server/` is placed at `resources/app-server/` as real filesystem files
+
+Stage Summary:
+- `package.json`: Removed `app-server/**` from `files`, added `extraResources` with filter patterns
+- `electron/main.js`: Changed `findServerDir()` to look in `process.resourcesPath + '/app-server'`
+- Installation remains fast (size optimization from previous session still active)
+- `sharp` native modules and `sql.js` WASM work correctly since they're now real files outside asar
