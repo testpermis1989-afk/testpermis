@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
-import sharp from 'sharp';
 import { db } from '@/lib/db';
 
 const MIME_TYPES: Record<string, string> = {
@@ -16,6 +15,17 @@ const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
 };
 
+// Check if sharp is available (may not work in some Electron builds)
+let sharpAvailable = false;
+let sharpModule: typeof import('sharp') | null = null;
+try {
+  sharpModule = require('sharp');
+  sharpAvailable = !!sharpModule;
+  console.log('[Import] Sharp module loaded:', sharpAvailable);
+} catch (e) {
+  console.warn('[Import] Sharp module NOT available, images will be saved without compression:', e);
+}
+
 // Check if we're in desktop/local mode
 function isLocalMode(): boolean {
   return (process.env.STORAGE_MODE || '') === 'local' || !!(process.env.DATABASE_URL || '').includes('file:');
@@ -23,6 +33,53 @@ function isLocalMode(): boolean {
 
 function getLocalDataDir(): string {
   return process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+}
+
+// Helper: compress image using sharp if available, otherwise return original
+async function compressImage(fileData: Buffer, ext: string): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
+  if (!sharpAvailable || !sharpModule) {
+    return { data: fileData, compressed: false, savedBytes: 0 };
+  }
+  try {
+    let compressedData: Buffer;
+    if (ext === '.png') {
+      compressedData = await sharpModule(fileData)
+        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+        .png({ quality: 80, compressionLevel: 9 })
+        .toBuffer();
+    } else {
+      compressedData = await sharpModule(fileData)
+        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+    }
+    return {
+      data: compressedData,
+      compressed: true,
+      savedBytes: Math.max(0, fileData.length - compressedData.length),
+    };
+  } catch (compressError) {
+    console.warn('[Import] Image compression failed, saving original:', compressError);
+    return { data: fileData, compressed: false, savedBytes: 0 };
+  }
+}
+
+// Helper: process and save an image file
+async function saveImage(dirPath: string, baseNameOriginal: string, fileData: Buffer, stats: { compressed: number; savedBytes: number }) {
+  fs.mkdirSync(dirPath, { recursive: true });
+  const ext = path.extname(baseNameOriginal).toLowerCase();
+
+  if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
+    const result = await compressImage(fileData, ext);
+    const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
+    fs.writeFileSync(path.join(dirPath, savedName), result.data);
+    if (result.compressed) {
+      stats.compressed++;
+      stats.savedBytes += result.savedBytes;
+    }
+  } else {
+    fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+  }
 }
 
 // POST /api/upload/rar - Upload, verify, compress and import ZIP file
@@ -107,8 +164,14 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Upload error:', error);
-    return NextResponse.json({ error: 'Upload failed: ' + (error as Error).message }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : '';
+    console.error('[Import] Upload error:', errorMessage);
+    console.error('[Import] Stack:', errorStack);
+    return NextResponse.json({ 
+      error: "Erreur lors de l'import: " + errorMessage,
+      details: errorStack ? errorStack.split('\n').slice(0, 5).join('\n') : undefined
+    }, { status: 500 });
   }
 }
 
@@ -171,67 +234,14 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 
       if (isQuestionImage(entryName, entryNameFull)) {
         const dirPath = path.join(seriesDir, 'images');
-        fs.mkdirSync(dirPath, { recursive: true });
-        // Auto-compress images (keep same format)
-        const ext = path.extname(baseNameOriginal).toLowerCase();
-        if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
-          try {
-            let compressedData: Buffer;
-            if (ext === '.png') {
-              compressedData = await sharp(fileData)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .png({ quality: 80, compressionLevel: 9 })
-                .toBuffer();
-            } else {
-              compressedData = await sharp(fileData)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 75 })
-                .toBuffer();
-            }
-            const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
-            fs.writeFileSync(path.join(dirPath, savedName), compressedData);
-            extractedFiles.savedBytes += Math.max(0, fileData.length - compressedData.length);
-            extractedFiles.compressed++;
-          } catch {
-            // If compression fails, save original
-            fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-          }
-        } else {
-          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-        }
+        await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
         extractedFiles.images++;
         continue;
       }
 
       if (isResponseImage(entryName, entryNameFull)) {
         const dirPath = path.join(seriesDir, 'responses');
-        fs.mkdirSync(dirPath, { recursive: true });
-        // Auto-compress response images (keep same format)
-        const ext = path.extname(baseNameOriginal).toLowerCase();
-        if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
-          try {
-            let compressedData: Buffer;
-            if (ext === '.png') {
-              compressedData = await sharp(fileData)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .png({ quality: 80, compressionLevel: 9 })
-                .toBuffer();
-            } else {
-              compressedData = await sharp(fileData)
-                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-                .jpeg({ quality: 75 })
-                .toBuffer();
-            }
-            const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
-            fs.writeFileSync(path.join(dirPath, savedName), compressedData);
-            extractedFiles.savedBytes += Math.max(0, fileData.length - compressedData.length);
-            extractedFiles.compressed++;
-          } catch {
-            fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-          }
-        } else {
-          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-        }
+        await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
         extractedFiles.responses++;
         continue;
       }
