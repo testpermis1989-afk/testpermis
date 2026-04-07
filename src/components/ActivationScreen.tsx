@@ -26,6 +26,7 @@ export default function ActivationScreen({ onActivated }: ActivationScreenProps)
   const [activating, setActivating] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [isTampered, setIsTampered] = useState<boolean>(false);
 
   // Fetch machine code and activation status on mount
   useEffect(() => {
@@ -43,8 +44,11 @@ export default function ActivationScreen({ onActivated }: ActivationScreenProps)
           if (data.machineCode) {
             setMachineCode(data.machineCode);
           }
-          if (data.reason) {
-            setError(data.reason);
+          if (data.reason === 'tampered') {
+            setIsTampered(true);
+            setError(data.message || 'Manipulation de l\'horloge systeme detectee. Veuillez recontacter l\'administrateur.');
+          } else if (data.reason === 'expired') {
+            setError('Votre licence a expire. Veuillez contacter l\'administrateur pour obtenir un nouveau code.');
           }
         } else {
           setError(data.error || "Impossible de récupérer les informations de licence");
@@ -121,11 +125,22 @@ export default function ActivationScreen({ onActivated }: ActivationScreenProps)
 
           <CardContent className="space-y-5 px-6 pt-6 pb-6">
             {/* Error Alert */}
-            {error && (
+            {error && !isTampered && (
               <Alert variant="destructive" className="border-red-200 bg-red-50">
                 <AlertCircle className="h-4 w-4 text-red-600" />
                 <AlertTitle className="text-red-800">Erreur</AlertTitle>
                 <AlertDescription className="text-red-700">{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {/* Clock Tampering Warning */}
+            {isTampered && (
+              <Alert className="border-orange-300 bg-orange-50">
+                <AlertCircle className="h-4 w-4 text-orange-600" />
+                <AlertTitle className="text-orange-800 font-bold">⚠️ Accès bloqué</AlertTitle>
+                <AlertDescription className="text-orange-700">
+                  {error}
+                </AlertDescription>
               </Alert>
             )}
 

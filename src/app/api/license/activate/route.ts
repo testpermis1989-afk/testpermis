@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const expiryDate = result.expiresAt!.toISOString();
+    const nowISO = new Date().toISOString();
 
     // Clear any previous activation
     try {
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       // Table may not exist yet
     }
 
-    // Store the new activation record
+    // Store the new activation record with lastCheckedAt
     await db.activation.create({
       data: {
         activationCode,
@@ -54,8 +55,9 @@ export async function POST(request: NextRequest) {
         durationCode: String(result.durationDays || 30),
         durationLabel: result.durationLabel || '',
         expiryDate,
-        activatedAt: new Date().toISOString(),
+        activatedAt: nowISO,
         expiresAt: expiryDate,
+        lastCheckedAt: nowISO,
       },
     });
 

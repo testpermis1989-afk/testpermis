@@ -198,6 +198,7 @@ async function getDb(): Promise<Database> {
     await _db.pragma('journal_mode = WAL');
     await _db.pragma('foreign_keys = ON');
     await initTables(_db);
+    await migrateDb(_db);
   }
   return _db;
 }
@@ -293,7 +294,8 @@ async function initTables(db: Database): Promise<void> {
       "durationLabel" TEXT NOT NULL,
       "expiryDate" TEXT NOT NULL,
       "activatedAt" TEXT NOT NULL,
-      "expiresAt" TEXT NOT NULL
+      "expiresAt" TEXT NOT NULL,
+      "lastCheckedAt" TEXT
     );
 
     CREATE TABLE IF NOT EXISTS "License" (
@@ -308,6 +310,16 @@ async function initTables(db: Database): Promise<void> {
       "createdAt" TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+}
+
+// Database migrations - safe to run multiple times
+async function migrateDb(db: Database): Promise<void> {
+  try {
+    // Migration 1: add lastCheckedAt column to Activation table
+    await db.exec('ALTER TABLE "Activation" ADD COLUMN "lastCheckedAt" TEXT');
+  } catch {
+    // Column already exists - ignore error (SQLite throws if column exists)
+  }
 }
 
 // Helper to convert SQLite boolean (0/1) to JS boolean
@@ -679,9 +691,24 @@ export const localDb = {
       const db = await getDb();
       const id = args.data.id || cuid();
       await (await db.prepare(
-        `INSERT INTO "Activation" (id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )).run(id, args.data.activationCode, args.data.machineCode, args.data.machineHash, args.data.durationCode, args.data.durationLabel, args.data.expiryDate, args.data.activatedAt, args.data.expiresAt);
+        `INSERT INTO "Activation" (id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt, lastCheckedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.activationCode, args.data.machineCode, args.data.machineHash, args.data.durationCode, args.data.durationLabel, args.data.expiryDate, args.data.activatedAt, args.data.expiresAt, args.data.lastCheckedAt || null);
       return { ...args.data, id };
+    },
+    update: async (args: { where: { id?: string }; data: any }) => {
+      const db = await getDb();
+      const activation = await localDb.activation.findFirst();
+      if (!activation) return null;
+      const sets: string[] = [];
+      const params: any[] = [];
+      if (args.data.lastCheckedAt !== undefined) {
+        sets.push('"lastCheckedAt" = ?');
+        params.push(args.data.lastCheckedAt);
+      }
+      if (sets.length === 0) return activation;
+      params.push(activation.id);
+      await (await db.prepare(`UPDATE "Activation" SET ${sets.join(', ')} WHERE id = ?`)).run(...params);
+      return localDb.activation.findFirst();
     },
     deleteMany: async () => {
       const db = await getDb();
