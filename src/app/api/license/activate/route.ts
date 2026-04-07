@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       // Table may not exist yet
     }
 
-    // Store the new activation record with lastCheckedAt
+    // Store the new activation record with lastCheckedAt and staleCheckCount
     await db.activation.create({
       data: {
         activationCode,
@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
         activatedAt: nowISO,
         expiresAt: expiryDate,
         lastCheckedAt: nowISO,
+        staleCheckCount: 0,
       },
     });
 

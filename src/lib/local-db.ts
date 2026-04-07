@@ -295,7 +295,8 @@ async function initTables(db: Database): Promise<void> {
       "expiryDate" TEXT NOT NULL,
       "activatedAt" TEXT NOT NULL,
       "expiresAt" TEXT NOT NULL,
-      "lastCheckedAt" TEXT
+      "lastCheckedAt" TEXT,
+      "staleCheckCount" INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS "License" (
@@ -319,6 +320,12 @@ async function migrateDb(db: Database): Promise<void> {
     await db.exec('ALTER TABLE "Activation" ADD COLUMN "lastCheckedAt" TEXT');
   } catch {
     // Column already exists - ignore error (SQLite throws if column exists)
+  }
+  try {
+    // Migration 2: add staleCheckCount column to Activation table
+    await db.exec('ALTER TABLE "Activation" ADD COLUMN "staleCheckCount" INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // Column already exists - ignore error
   }
 }
 
@@ -691,8 +698,8 @@ export const localDb = {
       const db = await getDb();
       const id = args.data.id || cuid();
       await (await db.prepare(
-        `INSERT INTO "Activation" (id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt, lastCheckedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )).run(id, args.data.activationCode, args.data.machineCode, args.data.machineHash, args.data.durationCode, args.data.durationLabel, args.data.expiryDate, args.data.activatedAt, args.data.expiresAt, args.data.lastCheckedAt || null);
+        `INSERT INTO "Activation" (id, activationCode, machineCode, machineHash, durationCode, durationLabel, expiryDate, activatedAt, expiresAt, lastCheckedAt, staleCheckCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )).run(id, args.data.activationCode, args.data.machineCode, args.data.machineHash, args.data.durationCode, args.data.durationLabel, args.data.expiryDate, args.data.activatedAt, args.data.expiresAt, args.data.lastCheckedAt || null, args.data.staleCheckCount || 0);
       return { ...args.data, id };
     },
     update: async (args: { where: { id?: string }; data: any }) => {
@@ -704,6 +711,10 @@ export const localDb = {
       if (args.data.lastCheckedAt !== undefined) {
         sets.push('"lastCheckedAt" = ?');
         params.push(args.data.lastCheckedAt);
+      }
+      if (args.data.staleCheckCount !== undefined) {
+        sets.push('"staleCheckCount" = ?');
+        params.push(args.data.staleCheckCount);
       }
       if (sets.length === 0) return activation;
       params.push(activation.id);

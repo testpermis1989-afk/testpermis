@@ -95,16 +95,17 @@ model TestResult {
 }
 
 model Activation {
-  id             String   @id @default(cuid())
-  activationCode String
-  machineCode    String
-  machineHash    String
-  durationCode   String
-  durationLabel  String
-  expiryDate     String
-  activatedAt    String
-  expiresAt      String
-  lastCheckedAt  String?
+  id               String   @id @default(cuid())
+  activationCode   String
+  machineCode      String
+  machineHash      String
+  durationCode     String
+  durationLabel    String
+  expiryDate       String
+  activatedAt      String
+  expiresAt        String
+  lastCheckedAt    String?
+  staleCheckCount  Int      @default(0)
 }
 
 model License {
