@@ -264,6 +264,11 @@ removeRecursiveSync(path.join(appServer, 'postcss.config.mjs'));
 removeRecursiveSync(path.join(appServer, 'tsconfig.json'));
 removeRecursiveSync(path.join(appServer, 'package.json'));
 removeRecursiveSync(path.join(appServer, 'next.config.ts'));
+
+// 7b. Create .npmignore to allow node_modules (override parent .gitignore)
+// electron-builder respects .npmignore, so we need to explicitly allow node_modules
+fs.writeFileSync(path.join(appServer, '.npmignore'), '# Allow node_modules for electron-builder extraResources\n!node_modules/\n');
+console.log('Created .npmignore for app-server (allows node_modules in electron build)');
 console.log('Done.');
 
 // 8. Find the server entry point

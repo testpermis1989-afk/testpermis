@@ -122,6 +122,7 @@
         "to": "app-server",
         "filter": [
           "**/*",
+          "node_modules/**",
           "!skills/**",
           "!upload/**",
           "!examples/**",
