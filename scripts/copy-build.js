@@ -158,6 +158,75 @@ removeRecursiveSync(path.join(nm, 'source-map-support'));
 console.log('Removing source-map...');
 removeRecursiveSync(path.join(nm, 'source-map'));
 
+// Remove Prisma engines (not needed - we use sql.js for local mode)
+console.log('Removing Prisma engines (using sql.js for local mode)...');
+removeRecursiveSync(path.join(nm, '.prisma'));
+removeRecursiveSync(path.join(nm, '@prisma', 'engines'));
+removeRecursiveSync(path.join(nm, 'prisma'));
+
+// Remove unnecessary large packages not needed at runtime
+console.log('Removing unnecessary dev-only packages...');
+removeRecursiveSync(path.join(nm, 'eslint'));
+removeRecursiveSync(path.join(nm, '@eslint'));
+removeRecursiveSync(path.join(nm, 'postcss'));
+removeRecursiveSync(path.join(nm, 'tailwindcss'));
+removeRecursiveSync(path.join(nm, '@tailwindcss'));
+removeRecursiveSync(path.join(nm, 'typescript'));
+
+// Remove test/debug utilities
+console.log('Removing test/debug utilities...');
+removeRecursiveSync(path.join(nm, 'jest'));
+removeRecursiveSync(path.join(nm, '@jest'));
+removeRecursiveSync(path.join(nm, 'ts-jest'));
+removeRecursiveSync(path.join(nm, '@testing-library'));
+
+// Remove electron-builder related (not needed in runtime)
+console.log('Removing electron-builder...');
+removeRecursiveSync(path.join(nm, 'electron-builder'));
+
+// Remove FFmpeg native binaries if present (large, ~50MB)
+console.log('Removing FFmpeg binaries (not needed in local mode)...');
+removeRecursiveSync(path.join(nm, 'ffmpeg-static'));
+removeRecursiveSync(path.join(nm, 'ffprobe-static'));
+
+// Remove CHANGES/CHANGELOG/AUTHORS/README files recursively from all packages (saves ~30MB)
+console.log('Removing documentation files from all packages...');
+function removeDocFilesRecursive(dir) {
+  if (!fs.existsSync(dir)) return;
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (['docs', 'doc', 'examples', 'example', 'coverage', '.github', 'website', 'www'].includes(entry.name)) {
+          removeRecursiveSync(fullPath);
+        } else {
+          removeDocFilesRecursive(fullPath);
+        }
+      } else if (entry.isFile()) {
+        const name = entry.name.toLowerCase();
+        if (name === 'changes.md' || name === 'changelog.md' || name === 'changelog.txt' ||
+            name === 'authors' || name === 'authors.md' || name === 'contributors.md' ||
+            name === 'history.md' || name === 'release-notes.md' || name === 'migrate.md' ||
+            name.startsWith('.eslintrc') || name === '.prettierrc' || name === '.editorconfig' ||
+            name === 'jest.config.js' || name === 'jest.config.ts' || name === 'vitest.config.ts') {
+          removeFile(fullPath);
+        }
+      }
+    }
+  } catch (e) {
+    // Ignore permission errors
+  }
+}
+removeDocFilesRecursive(nm);
+
+// Remove macOS sharp binaries (app is Windows-only, saves ~25MB)
+console.log('Removing macOS sharp binaries...');
+removeRecursiveSync(path.join(nm, '@img', 'sharp-libvips-darwin-x64'));
+removeRecursiveSync(path.join(nm, '@img', 'sharp-libvips-darwin-arm64'));
+removeRecursiveSync(path.join(nm, '@img', 'sharp-darwin-x64'));
+removeRecursiveSync(path.join(nm, '@img', 'sharp-darwin-arm64'));
+
 console.log('\n=== STRIPPING COMPLETE ===\n');
 
 // 6. Copy the complete standalone to 'app-server/'

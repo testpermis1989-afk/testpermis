@@ -39,10 +39,12 @@ function findServerDir() {
 
   if (isPackaged) {
     // Packaged app: app-server is in resources/app/app-server/
+    // When asar is enabled, app.getAppPath() returns the asar path
     const appPath = app.getAppPath();
     const dirs = [
       path.join(appPath, 'app-server'),
       path.join(__dirname, '..', 'app-server'),
+      path.join(path.dirname(process.execPath), 'resources', 'app', 'app-server'),
       path.join(appPath, '.next', 'standalone'),
     ];
     for (const d of dirs) {

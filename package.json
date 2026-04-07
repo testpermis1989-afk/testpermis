@@ -100,8 +100,14 @@
   },
   "build": {
     "npmRebuild": false,
-    "asar": false,
-    "compression": "store",
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/*.wasm",
+      "**/node_modules/sql.js/**",
+      "**/node_modules/sharp/**"
+    ],
+    "compression": "maximum",
     "appId": "com.permis.maroc",
     "productName": "Permis Maroc",
     "copyright": "Copyright © 2025 Permis Maroc",
@@ -111,6 +117,7 @@
     "files": [
       "electron/**",
       "app-server/**",
+      "!node_modules/**",
       "!app-server/skills/**",
       "!app-server/upload/**",
       "!app-server/examples/**",
@@ -127,7 +134,10 @@
       "!app-server/node_modules/@img/sharp-libvips-linux*/**",
       "!app-server/node_modules/@img/sharp-linux*/**",
       "!app-server/node_modules/source-map/**",
-      "!app-server/node_modules/source-map-support/**"
+      "!app-server/node_modules/source-map-support/**",
+      "!app-server/node_modules/@prisma/engines/**",
+      "!app-server/node_modules/.prisma/**",
+      "!app-server/node_modules/prisma/**"
     ],
     "win": {
       "target": [
