@@ -7,6 +7,8 @@ const SECRET = 'PERMIS_MAROC_2025_SECRET_KEY';
 
 // Duration codes - order must match exactly with activation-tool/main.js
 const DURATIONS: Record<string, number> = {
+  '2d': 2,
+  '7d': 7,
   '30d': 30,
   '90d': 90,
   '6mo': 180,
@@ -15,6 +17,8 @@ const DURATIONS: Record<string, number> = {
 };
 
 const DURATION_LABELS: Record<string, string> = {
+  '2d': '2 jours',
+  '7d': '7 jours',
   '30d': '30 jours',
   '90d': '90 jours',
   '6mo': '6 mois',
@@ -24,6 +28,8 @@ const DURATION_LABELS: Record<string, string> = {
 
 // Duration options for admin panel UI
 export const LICENSE_DURATIONS = [
+  { days: 2, code: '2d', label: '2 jours' },
+  { days: 7, code: '7d', label: '7 jours' },
   { days: 30, code: '30d', label: '30 jours' },
   { days: 90, code: '90d', label: '90 jours' },
   { days: 180, code: '6mo', label: '6 mois' },

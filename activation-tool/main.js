@@ -100,6 +100,8 @@ function saveConfig(config) {
 // so admin and client use the SAME value
 // =====================================================
 const DURATIONS = {
+  '2d': 2,
+  '7d': 7,
   '30d': 30,
   '90d': 90,
   '6mo': 180,
@@ -108,6 +110,8 @@ const DURATIONS = {
 };
 
 const DURATION_LABELS = {
+  '2d': '2 jours',
+  '7d': '7 jours',
   '30d': '30 jours',
   '90d': '90 jours',
   '6mo': '6 mois',

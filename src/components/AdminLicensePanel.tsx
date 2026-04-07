@@ -26,6 +26,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 
 const DURATION_OPTIONS = [
+  { value: "2d", label: "2 jours", days: 2 },
+  { value: "7d", label: "7 jours", days: 7 },
   { value: "30d", label: "30 jours", days: 30 },
   { value: "90d", label: "90 jours", days: 90 },
   { value: "6mo", label: "6 mois", days: 180 },
