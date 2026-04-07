@@ -189,3 +189,31 @@ Stage Summary:
 - Main savings: removed Linux binaries (33M), typescript (20M), sql.js bloat (17M), ZIP files (12M)
 - No functionality broken - server starts in 58ms
 - NSIS installer should be much smaller and faster to install
+
+---
+Task ID: 9
+Agent: main
+Task: Fix import series error in desktop mode + remove upload button + auto-compress
+
+Work Log:
+- User reported: "erreur d'upload : upload to cloud not available in desktop mode" when importing a series
+- Root cause: client-upload.ts is a stub that returns error in desktop mode; the "Uploader et importer directement" button was calling this function
+- User requested: remove the upload button, just verify ZIP file with automatic compression and validate import
+- Backend changes (src/app/api/upload/rar/route.ts):
+  - Added `import sharp from 'sharp'` 
+  - Updated extractAndImportLocal() to auto-compress images during import:
+    - PNG → resized to max 1024px, re-encoded as PNG with quality 80
+    - JPG/JPEG/BMP/TIFF → resized to max 1024px, re-encoded as JPEG with quality 75
+    - Falls back to saving original if compression fails
+  - Returns compression stats: imagesCompressed, savedBytes, savedFormatted
+- Frontend changes (src/app/page.tsx):
+  - Removed "📥 Uploader et importer directement" button entirely
+  - Changed "🔍 Vérifier le fichier ZIP" button to "📥 Vérifier et Importer" (green color)
+  - Updated all result displays to show compression statistics
+  - Desktop mode flow: verify → auto-compress → auto-import (single click)
+
+Stage Summary:
+- Error "upload to cloud not available in desktop mode" is fixed - no cloud upload attempted in desktop mode
+- Single "📥 Vérifier et Importer" button handles everything: verify + compress + import
+- Images are automatically compressed during import (sharp, max 1024px, optimized quality)
+- Compression stats shown in result message (images compressed, bytes saved)

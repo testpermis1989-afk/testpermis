@@ -2883,8 +2883,11 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           `🖼️ Réponses: ${ext.responses}`,
           `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
           `📝 Questions importées: ${data.questionsImported || 0}`
-        ].join('\n');
-        setMediaResult({ success: true, message: `✅ ${data.message}\n\n${details}` });
+        ];
+        if (data.compression?.imagesCompressed > 0) {
+          details.push(`\n🗜️ Compression: ${data.compression.imagesCompressed} image(s) compressée(s), ${data.compression.savedFormatted || formatSize(data.compression.savedBytes)} économisés`);
+        }
+        setMediaResult({ success: true, message: `✅ ${data.message}\n\n${details.join('\n')}` });
         loadSeriesData();
         setActiveTab('series');
       } else if (data.verification) {
@@ -2913,8 +2916,11 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                 `🖼️ Réponses: ${ext.responses}`,
                 `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
                 `📝 Questions importées: ${importData.questionsImported || 0}`
-              ].join('\n') : '';
-              setMediaResult({ success: true, message: `✅ ${importData.message}\n\n${details}` });
+              ] : [];
+              if (importData.compression?.imagesCompressed > 0) {
+                details.push(`\n🗜️ Compression: ${importData.compression.imagesCompressed} image(s) compressée(s), ${importData.compression.savedFormatted || formatSize(importData.compression.savedBytes)} économisés`);
+              }
+              setMediaResult({ success: true, message: `✅ ${importData.message}\n\n${details.join('\n')}` });
               loadSeriesData();
               setActiveTab('series');
             } else {
@@ -3180,11 +3186,14 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           `🖼️ Réponses: ${ext.responses}`,
           `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
           `📝 Questions importées: ${data.questionsImported || 0}`
-        ].join('\n') : '';
+        ] : [];
+        if (data.compression?.imagesCompressed > 0) {
+          details.push(`\n🗜️ Compression: ${data.compression.imagesCompressed} image(s) compressée(s), ${data.compression.savedFormatted || formatSize(data.compression.savedBytes)} économisés`);
+        }
         
         setMediaResult({ 
           success: true, 
-          message: `✅ ${data.message}\n\n${details}` 
+          message: `✅ ${data.message}\n\n${details.join('\n')}` 
         });
         loadSeriesData();
       } else {
@@ -3472,35 +3481,19 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                 )}
               </div>
 
-              {/* Verify button */}
+              {/* Verify and Import button - single step in desktop mode */}
               <button
                 onClick={handleVerify}
                 disabled={!mediaFile || verifying}
-                className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-bold py-3 rounded-lg hover:from-blue-400 hover:to-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3 rounded-lg hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 {verifying ? (
                   <span className="flex items-center justify-center gap-2">
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Vérification en cours...
+                    Vérification et import en cours...
                   </span>
                 ) : (
-                  '🔍 Vérifier le fichier ZIP'
-                )}
-              </button>
-
-              {/* Direct upload button */}
-              <button
-                onClick={() => handleMediaUpload()}
-                disabled={!mediaFile || uploadingMedia}
-                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold py-3 rounded-lg hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              >
-                {uploadingMedia ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Import en cours...
-                  </span>
-                ) : (
-                  '📥 Uploader et importer directement'
+                  '📥 Vérifier et Importer'
                 )}
               </button>
 

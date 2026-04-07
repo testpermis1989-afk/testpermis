@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
+import sharp from 'sharp';
 import { db } from '@/lib/db';
 
 const MIME_TYPES: Record<string, string> = {
@@ -113,12 +114,13 @@ export async function POST(request: NextRequest) {
 
 // =====================================================
 // LOCAL MODE: Extract ZIP to local filesystem + save to DB
+// Images are auto-compressed (WebP) during import
 // =====================================================
 async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
   const dataDir = getLocalDataDir();
   const uploadsDir = path.join(dataDir, 'uploads');
   const seriesDir = path.join(uploadsDir, `series/${categoryCode}/${serieNumber}`);
-  const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false };
+  const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false, compressed: 0, savedBytes: 0 };
   let questionsImported = 0;
 
   try {
@@ -170,7 +172,33 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       if (isQuestionImage(entryName, entryNameFull)) {
         const dirPath = path.join(seriesDir, 'images');
         fs.mkdirSync(dirPath, { recursive: true });
-        fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+        // Auto-compress images (keep same format)
+        const ext = path.extname(baseNameOriginal).toLowerCase();
+        if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
+          try {
+            let compressedData: Buffer;
+            if (ext === '.png') {
+              compressedData = await sharp(fileData)
+                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+                .png({ quality: 80, compressionLevel: 9 })
+                .toBuffer();
+            } else {
+              compressedData = await sharp(fileData)
+                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 75 })
+                .toBuffer();
+            }
+            const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
+            fs.writeFileSync(path.join(dirPath, savedName), compressedData);
+            extractedFiles.savedBytes += Math.max(0, fileData.length - compressedData.length);
+            extractedFiles.compressed++;
+          } catch {
+            // If compression fails, save original
+            fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          }
+        } else {
+          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+        }
         extractedFiles.images++;
         continue;
       }
@@ -178,7 +206,32 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       if (isResponseImage(entryName, entryNameFull)) {
         const dirPath = path.join(seriesDir, 'responses');
         fs.mkdirSync(dirPath, { recursive: true });
-        fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+        // Auto-compress response images (keep same format)
+        const ext = path.extname(baseNameOriginal).toLowerCase();
+        if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
+          try {
+            let compressedData: Buffer;
+            if (ext === '.png') {
+              compressedData = await sharp(fileData)
+                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+                .png({ quality: 80, compressionLevel: 9 })
+                .toBuffer();
+            } else {
+              compressedData = await sharp(fileData)
+                .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 75 })
+                .toBuffer();
+            }
+            const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
+            fs.writeFileSync(path.join(dirPath, savedName), compressedData);
+            extractedFiles.savedBytes += Math.max(0, fileData.length - compressedData.length);
+            extractedFiles.compressed++;
+          } catch {
+            fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          }
+        } else {
+          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+        }
         extractedFiles.responses++;
         continue;
       }
@@ -209,6 +262,12 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
     throw error;
   }
 
+  const formatSize = (b: number) => {
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(2) + ' MB';
+  };
+
   return {
     message: 'Fichier traité avec succès!',
     extracted: {
@@ -217,6 +276,11 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       video: extractedFiles.video,
       responses: extractedFiles.responses,
       txtProcessed: extractedFiles.txtFile !== false,
+    },
+    compression: {
+      imagesCompressed: extractedFiles.compressed,
+      savedBytes: extractedFiles.savedBytes,
+      savedFormatted: formatSize(extractedFiles.savedBytes),
     },
     questionsImported,
   };
