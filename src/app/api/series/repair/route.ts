@@ -143,8 +143,9 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // Audio MP3 - vérifier mais ne pas réparer (ffmpeg non disponible sur Vercel)
+    // Audio MP3 - réparer avec FFmpeg WASM
     const audioFolder = `${storagePrefix}/audio`;
+    const { repairMp3, repairMp4 } = await import('@/lib/ffmpeg-helper');
     try {
       const audios = await listFiles(audioFolder);
       for (const audio of audios) {
@@ -155,15 +156,25 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(audioStoragePath);
           if (isValidMp3(fileData)) continue;
 
-          // Can't repair without ffmpeg - just report
-          report.errors.push(`audio/${audio} — corrompu (ffmpeg non disponible sur serveur)`);
+          // Try to repair with FFmpeg WASM
+          const result = await repairMp3(fileData);
+          if (result.repaired) {
+            try {
+              await uploadFile(audioStoragePath, result.data, 'audio/mpeg');
+              report.repaired.push(`audio/${audio} — Audio réparé`);
+            } catch (uploadErr) {
+              report.errors.push(`audio/${audio} — Réparé mais upload échoué`);
+            }
+          } else {
+            report.errors.push(`audio/${audio} — Corrompu irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+          }
         } catch (err) {
           console.error(`Error downloading audio ${audio}:`, err);
         }
       }
     } catch {}
 
-    // Vidéo MP4 - vérifier mais ne pas réparer (ffmpeg non disponible sur Vercel)
+    // Vidéo MP4 - réparer avec FFmpeg WASM
     const videoFolder = `${storagePrefix}/video`;
     try {
       const videos = await listFiles(videoFolder);
@@ -175,8 +186,18 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(videoStoragePath);
           if (isValidMp4(fileData)) continue;
 
-          // Can't repair without ffmpeg - just report
-          report.errors.push(`video/${video} — corrompu (ffmpeg non disponible sur serveur)`);
+          // Try to repair with FFmpeg WASM
+          const result = await repairMp4(fileData);
+          if (result.repaired) {
+            try {
+              await uploadFile(videoStoragePath, result.data, 'video/mp4');
+              report.repaired.push(`video/${video} — Vidéo réparée`);
+            } catch (uploadErr) {
+              report.errors.push(`video/${video} — Réparée mais upload échoué`);
+            }
+          } else {
+            report.errors.push(`video/${video} — Corrompue irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+          }
         } catch (err) {
           console.error(`Error downloading video ${video}:`, err);
         }

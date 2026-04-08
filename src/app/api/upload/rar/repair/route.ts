@@ -111,23 +111,38 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // ===== AUDIO MP3 - keep as-is (ffmpeg not available on Vercel) =====
+        // ===== AUDIO MP3 - repair with FFmpeg WASM =====
         if (ext === '.mp3') {
           if (isValidMp3(fileData)) {
             newZip.addFile(entry.entryName, fileData);
           } else {
-            // Can't repair without ffmpeg - remove corrupted files
-            report.removed.push(`${baseName} — Audio corrompu (ffmpeg non disponible)`);
+            // Try to repair with FFmpeg WASM
+            const { repairMp3 } = await import('@/lib/ffmpeg-helper');
+            const result = await repairMp3(fileData);
+            if (result.repaired) {
+              newZip.addFile(stripParent + dirName + baseName, result.data);
+              report.repaired.push(`${baseName} — Audio réparé`);
+            } else {
+              report.removed.push(`${baseName} — Audio corrompu irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+            }
           }
           continue;
         }
 
-        // ===== VIDEO MP4 - keep as-is (ffmpeg not available on Vercel) =====
+        // ===== VIDEO MP4 - repair with FFmpeg WASM =====
         if (ext === '.mp4') {
           if (isValidMp4(fileData)) {
             newZip.addFile(entry.entryName, fileData);
           } else {
-            report.removed.push(`${baseName} — Vidéo corrompue (ffmpeg non disponible)`);
+            // Try to repair with FFmpeg WASM
+            const { repairMp4 } = await import('@/lib/ffmpeg-helper');
+            const result = await repairMp4(fileData);
+            if (result.repaired) {
+              newZip.addFile(stripParent + dirName + baseName, result.data);
+              report.repaired.push(`${baseName} — Vidéo réparée`);
+            } else {
+              report.removed.push(`${baseName} — Vidéo corrompue irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+            }
           }
           continue;
         }
