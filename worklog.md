@@ -126,3 +126,37 @@ Stage Summary:
 - Fixed: Repair button now works for images (Jimp) and validates audio/video files
 - GitHub commit: fc0bf4a pushed to main
 - ZIP: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
+
+---
+Task ID: 4
+Agent: Main
+Task: Fix Jimp API usage - images not compressed, repair button not working
+
+Work Log:
+- Discovered root cause of TWO bugs: Jimp v1.x is an ESM module
+- `require('jimp')` returns `{ Jimp, JimpMime, ... }` NOT `{ read, MIME_JPEG }`
+- All code was calling wrong methods which silently failed:
+  - `jimpModule.read()` → undefined (should be `jimpModule.Jimp.read()`)
+  - `image.scaleToFit(1024, 1024)` → ZodError (should be `{ w: 1024, h: 1024 }`)
+  - `image.getBufferAsync(MIME_JPEG)` → undefined (should be `await image.getBuffer('image/jpeg')`)
+- This caused ALL image compression to silently fail - files saved without compression
+- Also fixed repair button in desktop mode:
+  - Repair endpoint was checking `pendingImportId` which is null in desktop mode
+  - Fixed repair endpoint to accept FormData (ZIP file) for desktop mode
+  - Fixed frontend to send FormData in desktop, JSON in cloud mode
+  - After repair, auto-imports the repaired ZIP using base64 to File conversion
+
+Files Modified (6):
+- `src/app/api/upload/rar/route.ts` - Fixed Jimp API: Jimp.Jimp.read(), scaleToFit({w,h}), getBuffer('image/jpeg')
+- `src/app/api/upload/rar/compress/route.ts` - Same Jimp API fixes
+- `src/app/api/upload/rar/repair/route.ts` - Same Jimp API fixes + accept FormData for desktop
+- `src/app/api/series/repair/route.ts` - Same Jimp API fixes
+- `src/app/api/admin/compress/route.ts` - Same Jimp API fixes
+- `src/app/page.tsx` - Desktop repair: send FormData, convert base64 to File with atob/Uint8Array
+
+Stage Summary:
+- Fixed: Images now compressed during import (Jimp v1.x API correctly used)
+- Fixed: Repair button works in desktop mode (sends ZIP as FormData)
+- Server starts in 614ms, lint clean
+- GitHub commit: 150ae35 pushed to main
+- ZIP: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
