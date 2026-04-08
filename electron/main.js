@@ -70,8 +70,8 @@ function findServerDir() {
   }
 }
 
-// Poll server until ready
-function waitForServer(port, maxRetries = 60) {
+// Poll server until ready (robust: consumes response body, handles Node 24+)
+function waitForServer(port, maxRetries = 90) {
   return new Promise((resolve, reject) => {
     let retries = 0;
     const check = () => {
@@ -80,24 +80,35 @@ function waitForServer(port, maxRetries = 60) {
         return;
       }
       const req = http.get(`http://127.0.0.1:${port}/`, (res) => {
-        resolve(true);
+        // IMPORTANT: Must consume the response body in Node 24+
+        // Otherwise the connection hangs and resolve never fires
+        res.resume();
+        res.on('end', () => {
+          resolve(true);
+        });
+        // Also resolve immediately on data (don't wait for full body)
+        res.on('data', () => {
+          // First data chunk means server is responding
+          res.destroy();
+          resolve(true);
+        });
       });
       req.on('error', () => {
         retries++;
         if (retries >= maxRetries) {
           reject(new Error('Server did not start in time'));
         } else {
-          setTimeout(check, 1000);
+          setTimeout(check, 500); // Poll every 500ms instead of 1000ms
         }
       });
-      req.setTimeout(2000);
+      req.setTimeout(3000);
       req.on('timeout', () => {
         req.destroy();
         retries++;
         if (retries >= maxRetries) {
           reject(new Error('Server did not start in time'));
         } else {
-          setTimeout(check, 1000);
+          setTimeout(check, 500);
         }
       });
     };
