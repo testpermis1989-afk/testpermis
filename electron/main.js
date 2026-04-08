@@ -106,12 +106,19 @@ function waitForServer(port, maxRetries = 60) {
 }
 
 function createWindow() {
+  // Resolve icon path: packaged app uses resources/app-server/public/icon.ico,
+  // dev mode uses project root public/icon.ico
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app-server', 'public', 'icon.ico')
+    : path.join(__dirname, '..', 'public', 'icon.ico');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 800,
     minHeight: 600,
     title: 'Permis Maroc - اختبار رخصة القيادة',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

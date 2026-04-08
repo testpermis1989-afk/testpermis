@@ -121,7 +121,7 @@ function writeSeriesFile(data: SeriesFileData): void {
 export function saveSerieQuestions(
   categoryCode: string,
   serieNumber: number,
-  questions: { order: number; imageUrl: string; audioUrl: string; correctAnswers: string }[]
+  questions: { order: number; imageUrl: string; audioUrl: string; videoUrl?: string | null; responseImageUrl?: string; correctAnswers: string }[]
 ): { categoryId: string; questionsImported: number } {
   const data = readSeriesFile();
   const key = serieKey(categoryCode, serieNumber);
@@ -170,8 +170,8 @@ export function saveSerieQuestions(
       order: q.order,
       image: q.imageUrl,
       audio: q.audioUrl,
-      video: null,
-      text: '',
+      video: q.videoUrl || null,
+      text: q.responseImageUrl || '',
       duration: 30,
       responses,
     };

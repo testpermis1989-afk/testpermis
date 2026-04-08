@@ -286,9 +286,33 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       }
     }
 
+    // Scan extracted directories for actual file extensions
+    const imageExts = scanFileExtensions(
+      path.join(seriesDir, 'images'),
+      ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg'],
+      extractQuestionNumber
+    );
+    const audioExts = scanFileExtensions(
+      path.join(seriesDir, 'audio'),
+      ['.mp3', '.wav', '.ogg', '.aac', '.m4a'],
+      extractQuestionNumber
+    );
+    const responseExts = scanFileExtensions(
+      path.join(seriesDir, 'responses'),
+      ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg'],
+      extractResponseNumber
+    );
+    const videoExts = scanFileExtensions(
+      path.join(seriesDir, 'video'),
+      ['.mp4', '.webm', '.avi', '.mov', '.mkv'],
+      extractQuestionNumber
+    );
+
+    const extensions = { imageExts, audioExts, responseExts, videoExts };
+
     // Process TXT and create entries - PRIMARY: JSON file, SECONDARY: DB
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
-      questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber);
+      questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber, extensions);
     }
   } catch (error) {
     console.error('Extraction error:', error);
@@ -323,9 +347,14 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 // Process TXT content and create questions (LOCAL mode)
 // PRIMARY: JSON file storage (reliable, no DB dependency)
 // SECONDARY: SQLite DB (may fail in Electron)
-async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number): Promise<number> {
+async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number, extensions: {
+  imageExts: Map<number, string>;
+  audioExts: Map<number, string>;
+  responseExts: Map<number, string>;
+  videoExts: Map<number, string>;
+}): Promise<number> {
   const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-  const questions: { order: number; imageUrl: string; audioUrl: string; correctAnswers: string }[] = [];
+  const questions: { order: number; imageUrl: string; audioUrl: string; videoUrl: string | null; responseImageUrl: string; correctAnswers: string }[] = [];
 
   for (const line of lines) {
     const parts = line.split(/[\t\s,;]+/).filter(p => p);
@@ -334,10 +363,17 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
     const correctAnswers = parts[1];
     if (isNaN(questionNumber)) continue;
 
+    const imgExt = extensions.imageExts.get(questionNumber) || '.png';
+    const audExt = extensions.audioExts.get(questionNumber) || '.mp3';
+    const resExt = extensions.responseExts.get(questionNumber) || '.png';
+    const vidExt = extensions.videoExts.get(questionNumber) || null;
+
     questions.push({
       order: questionNumber,
-      imageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`,
-      audioUrl: `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`,
+      imageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}${imgExt}`,
+      audioUrl: `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}${audExt}`,
+      videoUrl: vidExt ? `/api/serve/series/${categoryCode}/${serieNumber}/video/q${questionNumber}${vidExt}` : null,
+      responseImageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/responses/r${questionNumber}${resExt}`,
       correctAnswers,
     });
   }
@@ -377,8 +413,8 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
             order: q.order,
             image: q.imageUrl,
             audio: q.audioUrl,
-            video: null,
-            text: '',
+            video: q.videoUrl || null,
+            text: q.responseImageUrl || '',
           },
         });
         for (let j = 1; j <= 4; j++) {
@@ -571,6 +607,28 @@ function extractQuestionNumber(filename: string): number | null {
 function extractResponseNumber(filename: string): number | null {
   const match = filename.match(/r(\d+)/i);
   return match ? parseInt(match[1]) : extractQuestionNumber(filename);
+}
+
+// Scan a directory for file extensions mapped by question number
+function scanFileExtensions(
+  dirPath: string,
+  validExts: string[],
+  numExtractor: (filename: string) => number | null
+): Map<number, string> {
+  const extensions = new Map<number, string>();
+  try {
+    if (!fs.existsSync(dirPath)) return extensions;
+    const files = fs.readdirSync(dirPath);
+    for (const f of files) {
+      const ext = path.extname(f).toLowerCase();
+      if (!validExts.includes(ext)) continue;
+      const num = numExtractor(f);
+      if (num !== null && !extensions.has(num)) {
+        extensions.set(num, ext);
+      }
+    }
+  } catch {}
+  return extensions;
 }
 
 function isQuestionImage(entryName: string, entryNameOriginal: string): boolean {

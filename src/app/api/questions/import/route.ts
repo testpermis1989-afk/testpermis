@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     const data = xlsx.utils.sheet_to_json(worksheet, { header: 1 }) as (string | number)[][];
 
     // Build questions array
-    const questions: { order: number; imageUrl: string; audioUrl: string; correctAnswers: string }[] = [];
+    const questions: { order: number; imageUrl: string; audioUrl: string; responseImageUrl?: string; videoUrl?: string | null; correctAnswers: string }[] = [];
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
       if (!row || row.length < 2) continue;
@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
         order: questionNumber,
         imageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`,
         audioUrl: `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`,
+        responseImageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/responses/r${questionNumber}.png`,
         correctAnswers,
       });
     }
