@@ -2,16 +2,23 @@
 // Controlled by STORAGE_MODE env var:
 //   'supabase' (default) → PostgreSQL via Prisma + Supabase
 //   'local' → SQLite via sql.js (for Electron / desktop app)
-
-import { PrismaClient } from '@prisma/client';
+//
+// IMPORTANT: Prisma is loaded LAZILY to avoid crashes in Electron/local mode
+// where @prisma/client engines may not be available
 
 const STORAGE_MODE = (process.env.STORAGE_MODE || 'supabase') as 'supabase' | 'local';
 
-// Prisma client for Supabase/PostgreSQL mode
-let _prisma: PrismaClient | null = null;
-function getPrisma(): PrismaClient {
+// Lazy-loaded Prisma client (only loaded when actually needed in supabase mode)
+let _prisma: any = null;
+async function getPrisma(): Promise<any> {
   if (!_prisma) {
-    _prisma = new PrismaClient();
+    try {
+      const mod = await import('@prisma/client');
+      _prisma = new mod.PrismaClient();
+    } catch (err) {
+      console.error('Failed to load Prisma client:', err);
+      throw new Error('Prisma client not available. Are you in local mode?');
+    }
   }
   return _prisma;
 }
@@ -32,14 +39,24 @@ function isLocalMode(): boolean {
 }
 
 // Create a db proxy that works for both modes
-// Cloud mode: direct pass-through to Prisma (no overhead)
-// Local mode: wraps local-db async methods
+// Cloud mode: lazy load Prisma only when accessed
+// Local mode: lazy load sql.js only when accessed
 function createDbProxy(): any {
   return new Proxy({} as any, {
     get(_target, prop) {
-      // Cloud/Supabase mode: return Prisma model directly (zero overhead)
+      // Cloud/Supabase mode: lazy load Prisma
       if (!isLocalMode()) {
-        return (getPrisma() as any)[String(prop)];
+        // Return a proxy that lazily initializes Prisma
+        return new Proxy({} as any, {
+          async get(_modelTarget, method) {
+            const prisma = await getPrisma();
+            const model = (prisma as any)[String(prop)];
+            if (!model) throw new Error(`Model "${String(prop)}" not found`);
+            const fn = model[String(method)];
+            if (!fn) throw new Error(`Method "${String(prop)}.${String(method)}" not found`);
+            return fn.bind(model);
+          }
+        });
       }
 
       // Local mode: return a proxy that wraps local db methods
@@ -52,7 +69,6 @@ function createDbProxy(): any {
             const fn = model[String(method)];
             if (!fn) throw new Error(`Method "${String(prop)}.${String(method)}" not found in local DB`);
             const result = fn(...args);
-            // Await if the method returns a Promise (all local methods are async)
             if (result && typeof result === 'object' && typeof result.then === 'function') {
               return await result;
             }
@@ -65,6 +81,3 @@ function createDbProxy(): any {
 }
 
 export const db = createDbProxy();
-
-// Also export the raw Prisma client for direct use when needed
-export { PrismaClient, getPrisma };

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +12,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fallback: admin/admin123 always works (all modes: local, supabase, electron)
+    // admin/admin123 always works - NO database dependency at all
     if (cin.toLowerCase() === 'admin' && password === 'admin123') {
       return NextResponse.json({
         user: {
@@ -31,6 +30,19 @@ export async function POST(request: NextRequest) {
           role: 'admin',
         },
       });
+    }
+
+    // For non-admin users, load database lazily (only when needed)
+    let db: any;
+    try {
+      const mod = await import('@/lib/db');
+      db = mod.db;
+    } catch (dbError) {
+      console.error('Database not available:', dbError);
+      return NextResponse.json(
+        { error: 'Base de données non disponible. Utilisez admin/admin123 pour la première connexion.' },
+        { status: 503 }
+      );
     }
 
     const user = await db.user.findUnique({
@@ -58,10 +70,12 @@ export async function POST(request: NextRequest) {
       todayMorocco.setHours(0, 0, 0, 0);
       const examDate = new Date(user.examDate + 'T00:00:00');
       if (examDate <= todayMorocco) {
-        await db.user.update({
-          where: { cin },
-          data: { isActive: false },
-        });
+        try {
+          await db.user.update({
+            where: { cin },
+            data: { isActive: false },
+          });
+        } catch { /* ignore update error */ }
         return NextResponse.json(
           { error: 'Compte désactivé - la date de votre examen est passée' },
           { status: 403 }
