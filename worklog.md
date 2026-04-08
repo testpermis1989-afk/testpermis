@@ -238,3 +238,26 @@ Stage Summary:
 - `electron/main.js`: Changed `findServerDir()` to look in `process.resourcesPath + '/app-server'`
 - Installation remains fast (size optimization from previous session still active)
 - `sharp` native modules and `sql.js` WASM work correctly since they're now real files outside asar
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix series import - files not saved, DB entries not created, confirmation not showing
+
+Work Log:
+- Analyzed the root cause: SQLite (sql.js) fails in packaged Electron app, causing ALL import operations to fail silently
+- Created src/lib/series-file.ts - JSON file fallback storage for series data (same pattern as activation-file.ts)
+- Modified src/app/api/upload/rar/route.ts - extractAndImportLocal now saves to JSON file FIRST, DB second
+- Modified src/app/api/questions/route.ts - reads from JSON file first, DB fallback
+- Modified src/app/api/questions/import/route.ts - reads from JSON file first, DB fallback
+- Modified src/app/api/questions/delete/route.ts - deletes from JSON + DB + local filesystem
+- Modified src/app/api/questions/melange/route.ts - reads mixed questions from JSON file first
+- Added individual try/catch for each file extraction operation
+- Added fileErrors array to import result for diagnostics
+- Previous commit (acdcf4f) also fixed local-db.ts _includeQuestions bug and added import confirmation modal
+
+Stage Summary:
+- Root cause: sql.js WASM module not available or DB init fails in packaged Electron → all DB operations crash silently
+- Solution: JSON file (data/series.json) as PRIMARY storage, SQLite as secondary/fallback
+- Import confirmation modal added (shows compression stats, question count, validation checklist)
+- local-db.ts fixed to properly handle _includeQuestions and where.number filtering
+- All 4 endpoints modified: questions, questions/import, questions/delete, questions/melange
