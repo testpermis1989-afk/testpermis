@@ -2699,6 +2699,16 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     details: { type: string; count: number; repaired: number; before: string; after: string }[];
   } | null>(null);
 
+  // Post-import confirmation state
+  const [importConfirmation, setImportConfirmation] = useState<{
+    category: string;
+    serie: number;
+    message: string;
+    extracted: { images: number; audio: number; video: number; responses: number; txtProcessed: boolean };
+    compression: { imagesCompressed: number; savedBytes: number; savedFormatted: string };
+    questionsImported: number;
+  } | null>(null);
+
   // Verification states
   const [verifying, setVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
@@ -2874,22 +2884,17 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       const data = await res.json();
 
       if (data.success && data.extracted) {
-        // Already imported (direct mode)! Show success result
+        // Already imported (direct mode)! Show confirmation modal
         const ext = data.extracted;
-        const details = [
-          `📷 Images: ${ext.images}`,
-          `🎵 Audio MP3: ${ext.audio}`,
-          `🎬 Vidéo MP4: ${ext.video}`,
-          `🖼️ Réponses: ${ext.responses}`,
-          `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
-          `📝 Questions importées: ${data.questionsImported || 0}`
-        ];
-        if (data.compression?.imagesCompressed > 0) {
-          details.push(`\n🗜️ Compression: ${data.compression.imagesCompressed} image(s) compressée(s), ${data.compression.savedFormatted || formatSize(data.compression.savedBytes)} économisés`);
-        }
-        setMediaResult({ success: true, message: `✅ ${data.message}\n\n${details.join('\n')}` });
         loadSeriesData();
-        setActiveTab('series');
+        setImportConfirmation({
+          category,
+          serie,
+          message: data.message || 'Import réussi!',
+          extracted: ext,
+          compression: data.compression || { imagesCompressed: 0, savedBytes: 0, savedFormatted: '0 B' },
+          questionsImported: data.questionsImported || 0,
+        });
       } else if (data.verification) {
         // Verification result
         if (isDesktop) {
@@ -2909,20 +2914,15 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
             const importData = await importRes.json();
             if (importData.success) {
               const ext = importData.extracted;
-              const details = ext ? [
-                `📷 Images: ${ext.images}`,
-                `🎵 Audio MP3: ${ext.audio}`,
-                `🎬 Vidéo MP4: ${ext.video}`,
-                `🖼️ Réponses: ${ext.responses}`,
-                `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
-                `📝 Questions importées: ${importData.questionsImported || 0}`
-              ] : [];
-              if (importData.compression?.imagesCompressed > 0) {
-                details.push(`\n🗜️ Compression: ${importData.compression.imagesCompressed} image(s) compressée(s), ${importData.compression.savedFormatted || formatSize(importData.compression.savedBytes)} économisés`);
-              }
-              setMediaResult({ success: true, message: `✅ ${importData.message}\n\n${details.join('\n')}` });
               loadSeriesData();
-              setActiveTab('series');
+              setImportConfirmation({
+                category,
+                serie,
+                message: importData.message || 'Import réussi!',
+                extracted: ext || { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false },
+                compression: importData.compression || { imagesCompressed: 0, savedBytes: 0, savedFormatted: '0 B' },
+                questionsImported: importData.questionsImported || 0,
+              });
             } else {
               setMediaResult({ success: false, message: `❌ Erreur d'import: ${importData.error}` });
             }
@@ -3058,22 +3058,16 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
       if (data.success) {
         const ext = data.extracted;
-        const details = ext ? [
-          `📷 Images: ${ext.images}`,
-          `🎵 Audio MP3: ${ext.audio}`,
-          `🎬 Vidéo MP4: ${ext.video}`,
-          `🖼️ Réponses: ${ext.responses}`,
-          `📄 Fichier TXT: ${ext.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}`,
-          `📝 Questions importées: ${data.questionsImported || 0}`
-        ].join('\n') : '';
-
-        setMediaResult({
-          success: true,
-          message: `✅ ${data.message}\n\n${details}`
-        });
         setPendingImportId(null);
         loadSeriesData();
-        setActiveTab('series');
+        setImportConfirmation({
+          category,
+          serie,
+          message: data.message || 'Import réussi!',
+          extracted: ext || { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false },
+          compression: data.compression || { imagesCompressed: 0, savedBytes: 0, savedFormatted: '0 B' },
+          questionsImported: data.questionsImported || 0,
+        });
       } else {
         setMediaResult({ success: false, message: `❌ Erreur: ${data.error}` });
       }
@@ -3789,6 +3783,132 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         className="px-5 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-bold text-sm"
                       >
                         ❌ Fermer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Import Confirmation Modal */}
+              {importConfirmation && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                  <div className="bg-gray-800 rounded-lg max-w-lg w-full overflow-hidden flex flex-col">
+                    {/* Header */}
+                    <div className="bg-green-600 px-6 py-4 flex justify-between items-center">
+                      <h3 className="text-white font-bold text-lg">✅ Importation terminée avec succès!</h3>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6 space-y-4">
+                      {/* Success message */}
+                      <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-4 text-center">
+                        <p className="text-green-300 font-bold text-lg mb-1">{importConfirmation.message}</p>
+                        <p className="text-gray-400">
+                          Série <span className="text-yellow-400 font-bold">{importConfirmation.category}</span> - <span className="text-yellow-400 font-bold">Série {importConfirmation.serie}</span>
+                        </p>
+                      </div>
+
+                      {/* Stats grid */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-blue-400">{importConfirmation.extracted.images}</div>
+                          <div className="text-gray-400 text-xs mt-1">📷 Images</div>
+                        </div>
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-purple-400">{importConfirmation.extracted.audio}</div>
+                          <div className="text-gray-400 text-xs mt-1">🎵 Audio</div>
+                        </div>
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-cyan-400">{importConfirmation.extracted.responses}</div>
+                          <div className="text-gray-400 text-xs mt-1">🖼️ Réponses</div>
+                        </div>
+                      </div>
+
+                      {/* Questions imported */}
+                      <div className="bg-gray-700/50 rounded-lg p-3 flex justify-between items-center">
+                        <span className="text-gray-300">📝 Questions importées:</span>
+                        <span className="text-green-400 font-bold text-xl">{importConfirmation.questionsImported}</span>
+                      </div>
+
+                      {/* TXT processed */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-300">📄 Fichier réponses:</span>
+                        <span className={importConfirmation.extracted.txtProcessed ? 'text-green-400' : 'text-red-400'}>
+                          {importConfirmation.extracted.txtProcessed ? '✅ Traité' : '❌ Non trouvé'}
+                        </span>
+                      </div>
+
+                      {/* Video count */}
+                      {importConfirmation.extracted.video > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-300">🎬 Vidéos:</span>
+                          <span className="text-cyan-400 font-bold">{importConfirmation.extracted.video}</span>
+                        </div>
+                      )}
+
+                      {/* Compression info */}
+                      {importConfirmation.compression.imagesCompressed > 0 && (
+                        <div className="bg-orange-900/30 border border-orange-500/50 rounded-lg p-3">
+                          <p className="text-orange-400 font-bold mb-2">🗜️ Compression des images</p>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-300 text-sm">
+                              {importConfirmation.compression.imagesCompressed} image(s) compressée(s)
+                            </span>
+                            <span className="text-green-400 font-bold">
+                              -{importConfirmation.compression.savedFormatted} économisés
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Validation checklist */}
+                      <div className="bg-gray-700/30 rounded-lg p-3">
+                        <p className="text-white font-bold mb-2">📋 Vérification:</p>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-400">✅</span>
+                            <span className="text-gray-300 text-sm">Fichier ZIP validé</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-400">✅</span>
+                            <span className="text-gray-300 text-sm">Fichiers extraits ({importConfirmation.extracted.images + importConfirmation.extracted.audio + importConfirmation.extracted.responses} fichiers)</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-green-400">✅</span>
+                            <span className="text-gray-300 text-sm">Questions enregistrées en base de données ({importConfirmation.questionsImported})</span>
+                          </div>
+                          {importConfirmation.compression.imagesCompressed > 0 && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-green-400">✅</span>
+                              <span className="text-gray-300 text-sm">Images compressées (-{importConfirmation.compression.savedFormatted})</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="px-6 py-4 bg-gray-700 flex gap-3 justify-end">
+                      <button
+                        onClick={() => {
+                          setImportConfirmation(null);
+                          setMediaResult(null);
+                          setMediaFile(null);
+                        }}
+                        className="px-5 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-bold text-sm transition-colors"
+                      >
+                        Fermer
+                      </button>
+                      <button
+                        onClick={() => {
+                          setImportConfirmation(null);
+                          setMediaResult(null);
+                          setMediaFile(null);
+                          setActiveTab('series');
+                        }}
+                        className="px-5 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm transition-colors"
+                      >
+                        ✅ Valider et voir les séries
                       </button>
                     </div>
                   </div>

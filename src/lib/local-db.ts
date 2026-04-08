@@ -448,7 +448,15 @@ export const localDb = {
         const row = await (await db.prepare('SELECT * FROM "Category" WHERE code = ?')).get(args.where.code);
         if (!row) return null;
         if (args.include?.series) {
-          return { ...row, series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions }) };
+          // Support both Prisma-style (questions: true) and custom (_includeQuestions: true)
+          const includeQ = !!args.include.series.questions || !!args.include.series._includeQuestions;
+          const includeCount = !!args.include.series._count;
+          const whereClause: any = { categoryId: row.id };
+          // Support series.where.number filtering
+          if (args.include.series.where?.number) {
+            whereClause.number = args.include.series.where.number;
+          }
+          return { ...row, series: await localDb.serie.findMany({ where: whereClause, _includeQuestions: includeQ, _includeCount: includeCount }) };
         }
         return row;
       }
@@ -456,7 +464,13 @@ export const localDb = {
         const row = await (await db.prepare('SELECT * FROM "Category" WHERE id = ?')).get(args.where.id);
         if (!row) return null;
         if (args.include?.series) {
-          return { ...row, series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions }) };
+          const includeQ = !!args.include.series.questions || !!args.include.series._includeQuestions;
+          const includeCount = !!args.include.series._count;
+          const whereClause: any = { categoryId: row.id };
+          if (args.include.series.where?.number) {
+            whereClause.number = args.include.series.where.number;
+          }
+          return { ...row, series: await localDb.serie.findMany({ where: whereClause, _includeQuestions: includeQ, _includeCount: includeCount }) };
         }
         return row;
       }
@@ -466,10 +480,14 @@ export const localDb = {
       const db = await getDb();
       const rows = await (await db.prepare('SELECT * FROM "Category" ORDER BY code')).all();
       if (args?.include?.series) {
-        return Promise.all(rows.map(async (row: any) => ({
-          ...row,
-          series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: !!args.include.series.questions, _includeCount: !!args.include.series._count })
-        })));
+        return Promise.all(rows.map(async (row: any) => {
+          const includeQ = !!args.include.series.questions || !!args.include.series._includeQuestions;
+          const includeCount = !!args.include.series._count;
+          return {
+            ...row,
+            series: await localDb.serie.findMany({ where: { categoryId: row.id }, _includeQuestions: includeQ, _includeCount: includeCount })
+          };
+        }));
       }
       return rows;
     },
@@ -515,10 +533,17 @@ export const localDb = {
         .get(args.where.categoryId, args.where.number);
       return (row as any) || null;
     },
-    findMany: async (args: { where: { categoryId: string }; _includeQuestions?: boolean; _includeCount?: boolean; orderBy?: any }) => {
+    findMany: async (args: { where: { categoryId: string; number?: number }; _includeQuestions?: boolean; _includeCount?: boolean; orderBy?: any }) => {
       const db = await getDb();
-      const rows = await (await db.prepare('SELECT * FROM "Serie" WHERE categoryId = ? ORDER BY number'))
-        .all(args.where.categoryId);
+      let sql = 'SELECT * FROM "Serie" WHERE categoryId = ?';
+      const params: any[] = [args.where.categoryId];
+      // Support filtering by serie number
+      if (args.where.number !== undefined) {
+        sql += ' AND number = ?';
+        params.push(args.where.number);
+      }
+      sql += ' ORDER BY number';
+      const rows = await (await db.prepare(sql)).all(...params);
       if (args._includeQuestions) {
         return Promise.all(rows.map(async (row: any) => ({
           ...row,
