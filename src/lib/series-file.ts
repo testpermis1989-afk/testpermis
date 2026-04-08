@@ -225,6 +225,7 @@ export function getSerieQuestions(
     image: q.image || '',
     audio: q.audio || '',
     video: q.video || '',
+    text: q.text || '',
     duration: q.duration || 30,
     responses: (q.responses || []).map(r => ({
       id: r.id,

@@ -2325,6 +2325,7 @@ interface QuestionView {
   image: string;
   audio: string;
   video: string | null;
+  text: string;
   responses: { order: number; isCorrect: boolean }[];
 }
 
@@ -3227,6 +3228,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
           image: q.image,
           audio: q.audio,
           video: q.video,
+          text: q.text || '',
           responses: q.responses,
         })));
       }
@@ -4138,22 +4140,32 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                   </div>
                                 </td>
                                 <td className="px-3 py-2 text-center">
-                                  <div className="flex justify-center gap-1">
-                                    {[1, 2, 3, 4].map((num) => {
-                                      const resp = q.responses.find(r => r.order === num);
-                                      return (
-                                        <span 
-                                          key={num}
-                                          className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                                            resp?.isCorrect 
-                                              ? 'bg-green-500 text-white' 
-                                              : 'bg-gray-600 text-gray-300'
-                                          }`}
-                                        >
-                                          {num}
-                                        </span>
-                                      );
-                                    })}
+                                  <div className="flex flex-col items-center gap-1">
+                                    <div className="flex justify-center gap-1">
+                                      {[1, 2, 3, 4].map((num) => {
+                                        const resp = q.responses.find(r => r.order === num);
+                                        return (
+                                          <span 
+                                            key={num}
+                                            className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                              resp?.isCorrect 
+                                                ? 'bg-green-500 text-white' 
+                                                : 'bg-gray-600 text-gray-300'
+                                            }`}
+                                          >
+                                            {num}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    {q.text && (
+                                      <button 
+                                        onClick={() => setViewResponseImage(q.text)}
+                                        className="bg-cyan-600 hover:bg-cyan-500 px-2 py-0.5 rounded text-[10px] font-bold transition-colors"
+                                      >
+                                        🖼️ Voir
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                               </tr>

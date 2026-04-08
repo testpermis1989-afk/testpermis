@@ -42,23 +42,16 @@ function getLocalDataDir(): string {
 }
 
 // Helper: compress image using sharp if available, otherwise return original
-async function compressImage(fileData: Buffer, ext: string): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
+// Always outputs WebP format for maximum compression
+async function compressImage(fileData: Buffer): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
   if (!sharpAvailable || !sharpModule) {
     return { data: fileData, compressed: false, savedBytes: 0 };
   }
   try {
-    let compressedData: Buffer;
-    if (ext === '.png') {
-      compressedData = await sharpModule(fileData)
-        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-        .png({ quality: 80, compressionLevel: 9 })
-        .toBuffer();
-    } else {
-      compressedData = await sharpModule(fileData)
-        .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 75 })
-        .toBuffer();
-    }
+    const compressedData = await sharpModule(fileData)
+      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
     return {
       data: compressedData,
       compressed: true,
@@ -71,13 +64,17 @@ async function compressImage(fileData: Buffer, ext: string): Promise<{ data: Buf
 }
 
 // Helper: process and save an image file
+// Converts to WebP when sharp is available for smaller file sizes
 async function saveImage(dirPath: string, baseNameOriginal: string, fileData: Buffer, stats: { compressed: number; savedBytes: number }) {
   fs.mkdirSync(dirPath, { recursive: true });
   const ext = path.extname(baseNameOriginal).toLowerCase();
 
-  if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
-    const result = await compressImage(fileData, ext);
-    const savedName = baseNameOriginal.replace(/\.[^.]+$/, ext === '.jpeg' ? '.jpg' : ext);
+  if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) {
+    const result = await compressImage(fileData);
+    // Always save as .webp when sharp is available, keep original otherwise
+    const savedName = result.compressed
+      ? baseNameOriginal.replace(/\.[^.]+$/, '.webp')
+      : baseNameOriginal;
     fs.writeFileSync(path.join(dirPath, savedName), result.data);
     if (result.compressed) {
       stats.compressed++;
@@ -310,6 +307,22 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 
     const extensions = { imageExts, audioExts, responseExts, videoExts };
 
+    // Verify files on disk after extraction
+    const diskStats: { imagesFound: number; audioFound: number; videoFound: number; responsesFound: number } = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
+    try {
+      for (const sub of ['images', 'audio', 'video', 'responses'] as const) {
+        const subDir = path.join(seriesDir, sub);
+        if (fs.existsSync(subDir)) {
+          const files = fs.readdirSync(subDir);
+          const count = files.length;
+          if (sub === 'images') diskStats.imagesFound = count;
+          else if (sub === 'audio') diskStats.audioFound = count;
+          else if (sub === 'video') diskStats.videoFound = count;
+          else diskStats.responsesFound = count;
+        }
+      }
+    } catch {}
+
     // Process TXT and create entries - PRIMARY: JSON file, SECONDARY: DB
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
       questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber, extensions);
@@ -340,6 +353,7 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       savedFormatted: formatSize(extractedFiles.savedBytes),
     },
     questionsImported,
+    diskStats,
     fileErrors: fileErrors.length > 0 ? fileErrors : undefined,
   };
 }

@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       image: q.image || '',
       audio: q.audio || '',
       video: q.video || '',
+      text: q.text || '',
       duration: q.duration || 30,
       responses: (q.responses || []).map((r: any) => ({
         id: r.id,
