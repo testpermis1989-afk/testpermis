@@ -92,3 +92,37 @@ Stage Summary:
 - The complete import → serve chain verified correct: files saved to LOCAL_DATA_DIR/uploads/, served from same path via /api/serve/ API
 - GitHub commit: a9386b4 pushed to main
 - ZIP: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
+
+---
+Task ID: 3
+Agent: Main
+Task: Fix repair button not working - remove FFmpeg WASM causing server crash
+
+Work Log:
+- Analyzed that the repair button ("Réparer les fichiers corrompus") was not working
+- Root cause: FFmpeg WASM packages (@ffmpeg/ffmpeg, @ffmpeg/util, fluent-ffmpeg) were causing the Electron server to hang during startup
+- The WASM module imports in ffmpeg-helper.ts would freeze the server process, making it fail the 60-second health check
+- Solution: Removed all FFmpeg WASM packages entirely since they don't work reliably in Electron's standalone server context
+- Also removed `sharp` from package.json (was already replaced by Jimp earlier, but still listed as dependency)
+- Deleted `src/lib/ffmpeg-helper.ts` 
+- Updated repair routes to work without FFmpeg:
+  - Images: repaired with Jimp (100% JavaScript, works in Electron without native binaries)
+  - Audio/Video: validated by header signatures, corrupted small files removed
+  - Audio/Video with non-standard headers preserved (some encoders use unconventional headers)
+- Added local filesystem repair support in series/repair for Electron LOCAL_DATA_DIR
+- Updated frontend: removed "(ffmpeg)" from button text, added "skipped" files display
+- Server now starts in 720ms (was hanging 60+ seconds before)
+
+Files Modified:
+- `package.json` - Removed @ffmpeg/ffmpeg, @ffmpeg/util, fluent-ffmpeg, sharp
+- `bun.lock` - Updated
+- `src/lib/ffmpeg-helper.ts` - DELETED
+- `src/app/api/upload/rar/repair/route.ts` - Removed FFmpeg, kept Jimp for images + header validation for audio/video
+- `src/app/api/series/repair/route.ts` - Removed FFmpeg, kept Jimp for images + header validation + local filesystem support
+- `src/app/page.tsx` - Updated button text, added skipped files display in both repair handlers
+
+Stage Summary:
+- Fixed: Server startup crash caused by FFmpeg WASM
+- Fixed: Repair button now works for images (Jimp) and validates audio/video files
+- GitHub commit: fc0bf4a pushed to main
+- ZIP: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
