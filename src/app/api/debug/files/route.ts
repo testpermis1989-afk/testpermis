@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 export async function GET() {
-  const dataDir = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+  const dataDir = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
   const uploadsDir = path.join(dataDir, 'uploads');
   
   const result: Record<string, any> = {

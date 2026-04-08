@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-const LOCAL_DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+const LOCAL_DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
 const LOCAL_TEMP_DIR = path.join(LOCAL_DATA_DIR, 'temp-uploads');
 
 export async function POST(request: NextRequest) {

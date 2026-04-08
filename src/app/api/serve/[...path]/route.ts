@@ -61,7 +61,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
 
-    const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+    const DATA_DIR = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
     const fullPath = path.join(DATA_DIR, 'uploads', filePath);
 
     // Check file exists

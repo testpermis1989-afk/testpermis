@@ -38,7 +38,7 @@ function isLocalMode(): boolean {
 }
 
 function getLocalDataDir(): string {
-  return process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data');
+  return process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
 }
 
 // Helper: compress image using sharp if available, otherwise return original
@@ -189,6 +189,7 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
   const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false, compressed: 0, savedBytes: 0 };
   let questionsImported = 0;
   let fileErrors: string[] = [];
+  let diskStats: { imagesFound: number; audioFound: number; videoFound: number; responsesFound: number } = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
 
   try {
     // Ensure upload directories exist
@@ -308,7 +309,7 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
     const extensions = { imageExts, audioExts, responseExts, videoExts };
 
     // Verify files on disk after extraction
-    const diskStats: { imagesFound: number; audioFound: number; videoFound: number; responsesFound: number } = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
+    diskStats = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
     try {
       for (const sub of ['images', 'audio', 'video', 'responses'] as const) {
         const subDir = path.join(seriesDir, sub);
