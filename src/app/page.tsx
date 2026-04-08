@@ -3534,14 +3534,16 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                 if (!isDesktop && !pendingImportId) return;
                                 const btn = (event?.target as HTMLButtonElement);
                                 const origText = btn?.textContent || '';
-                                if (btn) btn.textContent = '⏳ Réparation en cours...';
+                                if (btn) btn.textContent = '⏳ Réparation + Import en cours...';
                                 try {
                                   // 1) Réparer les fichiers corrompus
                                   let res: Response;
                                   if (isDesktop) {
-                                    // Desktop: send ZIP as FormData directly
+                                    // Desktop: send ZIP + category + serie → server repairs AND imports directly
                                     const formData = new FormData();
                                     formData.append('file', mediaFile!);
+                                    formData.append('category', category);
+                                    formData.append('serie', serie.toString());
                                     res = await fetch('/api/upload/rar/repair', {
                                       method: 'POST',
                                       body: formData,
@@ -3561,62 +3563,35 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                     return;
                                   }
 
-                                  // 2) Afficher le résultat de la réparation
+                                  // 2) Afficher le résultat
                                   const { summary, report } = data;
                                   let msg = '✅ Réparation terminée!\n';
-                                  msg += `📁 ${summary.totalRepaired} fichier(s) réparé(s)\n`;
-                                  if (summary.totalRemoved > 0) {
-                                    msg += `🗑️ ${summary.totalRemoved} fichier(s) irréparable(s) supprimé(s)\n`;
+                                  msg += `📁 ${summary?.totalRepaired || 0} fichier(s) réparé(s)\n`;
+                                  if (summary?.totalRemoved > 0) {
+                                    msg += `🗑️ ${summary.totalRemoved} fichier(s) irréparable(s)\n`;
                                   }
-                                  if (report.repaired.length > 0) {
+                                  if (report?.repaired?.length > 0) {
                                     msg += '\n✅ Réparés:\n' + report.repaired.map((r: string) => '  • ' + r).join('\n');
                                   }
-                                  if (report.removed.length > 0) {
-                                    msg += '\n❌ Supprimés (irréparables):\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
-                                  }
-                                  if (report.skipped && report.skipped.length > 0) {
-                                    msg += '\n⏭️ Conservés:\n' + report.skipped.map((r: string) => '  • ' + r).join('\n');
+                                  if (report?.removed?.length > 0) {
+                                    msg += '\n❌ Supprimés:\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
                                   }
 
-                                  // 3) In desktop mode: re-import with the repaired ZIP
-                                  if (isDesktop && data.zipBuffer) {
-                                    msg += '\n✅ Import en cours...';
+                                  // 3) In desktop mode: server already imported!
+                                  if (isDesktop && data.mode === 'desktop') {
+                                    msg += `\n✅ ${data.questionsImported || 0} question(s) importée(s)`;
+                                    if (data.compression?.imagesCompressed > 0) {
+                                      msg += `\n📦 ${data.compression.imagesCompressed} image(s) compressée(s) (${data.compression.savedFormatted})`;
+                                    }
                                     alert(msg);
-                                    if (btn) btn.textContent = '⏳ Import...';
                                     setShowVerificationModal(false);
                                     setCompressBeforeImport(null);
-
-                                    // Import the repaired ZIP directly
-                                    const binaryStr = atob(data.zipBuffer);
-                                    const bytes = new Uint8Array(binaryStr.length);
-                                    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-                                    const repairedBlob = new Blob([bytes], { type: 'application/zip' });
-                                    const repairedFile = new File([repairedBlob], mediaFile!.name, { type: 'application/zip' });
-
-                                    const importForm = new FormData();
-                                    importForm.append('file', repairedFile);
-                                    importForm.append('category', category);
-                                    importForm.append('serie', serie.toString());
-                                    const importRes = await fetch('/api/upload/rar', {
-                                      method: 'POST',
-                                      body: importForm,
-                                    });
-                                    const importData = await importRes.json();
-                                    if (importData.success) {
-                                      loadSeriesData();
-                                      setImportConfirmation({
-                                        category,
-                                        serie,
-                                        message: importData.message || 'Import réussi après réparation!',
-                                        extracted: importData.extracted || { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false },
-                                        compression: importData.compression || { imagesCompressed: 0, savedBytes: 0, savedFormatted: '0 B' },
-                                        questionsImported: importData.questionsImported || 0,
-                                      });
-                                    } else {
-                                      alert('❌ Erreur import après réparation: ' + (importData.error || ''));
+                                    loadSeriesData();
+                                  } else if (!isDesktop) {
+                                    // Cloud mode: update verification
+                                    if (summary?.totalRepaired === 0 && summary?.totalRemoved === 0) {
+                                      msg += '\n✨ Tous les fichiers sont valides!';
                                     }
-                                  } else if (isDesktop) {
-                                    msg += '\n\n⚠️ Impossible de ré-importer (ZIP non retourné)';
                                     alert(msg);
                                   }
                                 } catch {
