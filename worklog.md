@@ -71,3 +71,24 @@ Stage Summary:
 - Committed as e4601ae and pushed to GitHub
 - ZIP download: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
 - User should rebuild Electron app with electron:build to test
+---
+Task ID: 1
+Agent: Main
+Task: Fix series import error (diskStats is not defined) + add turbopackIgnore safety
+
+Work Log:
+- Analyzed user screenshot showing "diskStats is not defined" error during series import
+- Traced the full import flow: ZIP upload → extract → compress → save to JSON + DB
+- Found root cause: `diskStats` variable declared with `const` inside `try` block but referenced outside in `return` statement
+- Fix already applied: moved declaration to `let` before try block (line 192 of rar/route.ts)
+- Added `turbopackIgnore: true` comments to `process.cwd()` calls in 4 files to prevent build-time static evaluation in Electron
+- Files modified: serve/[...path]/route.ts, upload/rar/route.ts, upload/temp/route.ts, debug/files/route.ts
+- Ran lint - clean
+- Committed and pushed to GitHub
+
+Stage Summary:
+- Fixed: "diskStats is not defined" import error - variable scoping bug
+- Fixed: Added turbopackIgnore safety to all process.cwd() fallback paths
+- The complete import → serve chain verified correct: files saved to LOCAL_DATA_DIR/uploads/, served from same path via /api/serve/ API
+- GitHub commit: a9386b4 pushed to main
+- ZIP: https://github.com/testpermis1989-afk/testpermis/archive/refs/heads/main.zip
