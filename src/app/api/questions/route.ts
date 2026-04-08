@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSerieQuestions } from '@/lib/series-file';
 
 // GET /api/questions - Get questions for a serie
 export async function GET(request: NextRequest) {
@@ -10,6 +11,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing category or serie' }, { status: 400 });
   }
 
+  // PRIMARY: Read from JSON file (most reliable in Electron)
+  try {
+    const jsonResult = getSerieQuestions(categoryCode, parseInt(serieNumber));
+    if (jsonResult) {
+      return NextResponse.json(jsonResult);
+    }
+  } catch (e) {
+    console.log('[/api/questions] JSON file read failed:', e);
+  }
+
+  // SECONDARY: Try database
   try {
     const { db } = await import('@/lib/db');
 
@@ -57,10 +69,7 @@ export async function GET(request: NextRequest) {
       questions,
     });
   } catch (error) {
-    console.error('Error fetching questions:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch questions: ' + (error instanceof Error ? error.message : String(error)) },
-      { status: 500 }
-    );
+    console.error('Error fetching questions from DB:', error);
+    return NextResponse.json({ error: 'Serie not found', questions: [] });
   }
 }

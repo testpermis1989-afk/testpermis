@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { toSupabaseUrl } from '@/lib/supabase';
+import { getSerieQuestions } from '@/lib/series-file';
 
 // GET /api/questions/melange?category=A - Get mixed questions
 // B: 40 from B | A/C/D/E: 36 from B + 10 from category
@@ -13,64 +12,137 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // PRIMARY: Read from JSON file
+    const questions = await getMelangeFromJson(categoryCode);
+    if (questions.length > 0) {
+      return NextResponse.json({ questions });
+    }
+
+    // SECONDARY: Try database
+    const questionsFromDb = await getMelangeFromDb(categoryCode);
+    if (questionsFromDb.length > 0) {
+      return NextResponse.json({ questions: questionsFromDb });
+    }
+
+    return NextResponse.json({ questions: [], error: 'Aucune question trouvée. Importez des séries d\'abord.' });
+  } catch (error) {
+    console.error('Error fetching melange questions:', error);
+    return NextResponse.json({ questions: [], error: 'Failed to fetch questions' });
+  }
+}
+
+// Get melange questions from JSON file
+function getMelangeFromJson(categoryCode: string): any[] {
+  const { readSeriesFile } = require('@/lib/series-file');
+  const data = readSeriesFile();
+  const allQuestions: any[] = [];
+
+  const collectQuestions = (code: string, count: number) => {
+    const seriesForCat = Object.entries(data.series).filter(([, s]) => s.categoryCode === code);
+    for (const [key] of seriesForCat) {
+      const qList = data.questions[key] || [];
+      for (const q of qList) {
+        allQuestions.push({
+          id: q.id,
+          order: q.order,
+          image: q.image || '',
+          audio: q.audio || '',
+          video: q.video || '',
+          duration: q.duration || 30,
+          responses: (q.responses || []).map((r: any) => ({
+            id: r.id,
+            order: r.order,
+            text: r.text || '',
+            image: r.image || '',
+            isCorrect: !!r.isCorrect,
+          })),
+        });
+      }
+    }
+    shuffleArray(allQuestions);
+    return allQuestions.splice(0, count);
+  };
+
+  if (categoryCode === 'B') {
+    // B: 40 random from B
+    collectQuestions('B', 40);
+  } else {
+    // A/C/D/E: 36 from B + 10 from category
+    const bQuestions: any[] = [];
+    const bSeries = Object.entries(data.series).filter(([, s]) => s.categoryCode === 'B');
+    for (const [key] of bSeries) {
+      const qList = data.questions[key] || [];
+      for (const q of qList) {
+        bQuestions.push({
+          id: q.id, order: q.order, image: q.image || '', audio: q.audio || '',
+          video: q.video || '', duration: q.duration || 30,
+          responses: (q.responses || []).map((r: any) => ({
+            id: r.id, order: r.order, text: r.text || '', image: r.image || '', isCorrect: !!r.isCorrect,
+          })),
+        });
+      }
+    }
+    shuffleArray(bQuestions);
+    allQuestions.push(...bQuestions.slice(0, 36));
+
+    const otherQuestions: any[] = [];
+    const otherSeries = Object.entries(data.series).filter(([, s]) => s.categoryCode === categoryCode);
+    for (const [key] of otherSeries) {
+      const qList = data.questions[key] || [];
+      for (const q of qList) {
+        otherQuestions.push({
+          id: q.id, order: q.order, image: q.image || '', audio: q.audio || '',
+          video: q.video || '', duration: q.duration || 30,
+          responses: (q.responses || []).map((r: any) => ({
+            id: r.id, order: r.order, text: r.text || '', image: r.image || '', isCorrect: !!r.isCorrect,
+          })),
+        });
+      }
+    }
+    shuffleArray(otherQuestions);
+    allQuestions.push(...otherQuestions.slice(0, 10));
+  }
+
+  shuffleArray(allQuestions);
+  return allQuestions;
+}
+
+// Get melange questions from database (fallback)
+async function getMelangeFromDb(categoryCode: string): Promise<any[]> {
+  try {
+    const { db } = await import('@/lib/db');
     const questions: any[] = [];
 
     if (categoryCode === 'B') {
-      // Catégorie B: 40 questions aléatoires de toutes les séries B
       const categoryB = await db.category.findUnique({
         where: { code: 'B' },
         include: {
           series: {
-            include: {
-              questions: {
-                include: {
-                  responses: { orderBy: { order: 'asc' } },
-                },
-                orderBy: { order: 'asc' },
-              },
-            },
+            include: { questions: { include: { responses: { orderBy: { order: 'asc' } } }, orderBy: { order: 'asc' } } },
             orderBy: { number: 'asc' },
           },
         },
       });
-
       if (categoryB) {
-        const allQuestions = categoryB.series.flatMap(s =>
-          s.questions.map(q => ({
-            id: q.id,
-            order: q.order,
-            image: toSupabaseUrl(q.image),
-            audio: toSupabaseUrl(q.audio),
-            video: toSupabaseUrl(q.video),
-            duration: q.duration,
-            responses: q.responses.map(r => ({
-              id: r.id,
-              order: r.order,
-              text: r.text,
-              image: toSupabaseUrl(r.image),
-              isCorrect: r.isCorrect,
+        const allQuestions = categoryB.series.flatMap((s: any) =>
+          s.questions.map((q: any) => ({
+            id: q.id, order: q.order, image: q.image || '', audio: q.audio || '',
+            video: q.video || '', duration: q.duration || 30,
+            responses: q.responses.map((r: any) => ({
+              id: r.id, order: r.order, text: r.text || '', image: r.image || '', isCorrect: !!r.isCorrect,
             })),
           }))
         );
-        // Shuffle et prendre 40
         shuffleArray(allQuestions);
         questions.push(...allQuestions.slice(0, 40));
       }
     } else {
-      // A/C/D/E: 36 de B + 10 de la catégorie
       const [categoryB, categoryOther] = await Promise.all([
         db.category.findUnique({
           where: { code: 'B' },
           include: {
             series: {
-              include: {
-                questions: {
-                  include: {
-                    responses: { orderBy: { order: 'asc' } },
-                  },
-                  orderBy: { order: 'asc' },
-                },
-              },
+              include: { questions: { include: { responses: { orderBy: { order: 'asc' } } }, orderBy: { order: 'asc' } } },
               orderBy: { number: 'asc' },
             },
           },
@@ -79,78 +151,43 @@ export async function GET(request: NextRequest) {
           where: { code: categoryCode },
           include: {
             series: {
-              include: {
-                questions: {
-                  include: {
-                    responses: { orderBy: { order: 'asc' } },
-                  },
-                  orderBy: { order: 'asc' },
-                },
-              },
+              include: { questions: { include: { responses: { orderBy: { order: 'asc' } } }, orderBy: { order: 'asc' } } },
               orderBy: { number: 'asc' },
             },
           },
         }),
       ]);
 
-      const allBQuestions = categoryB
-        ? categoryB.series.flatMap(s =>
-            s.questions.map(q => ({
-              id: q.id,
-              order: q.order,
-              image: toSupabaseUrl(q.image),
-              audio: toSupabaseUrl(q.audio),
-              video: toSupabaseUrl(q.video),
-              duration: q.duration,
-              responses: q.responses.map(r => ({
-                id: r.id,
-                order: r.order,
-                text: r.text,
-                image: toSupabaseUrl(r.image),
-                isCorrect: r.isCorrect,
-              })),
-            }))
-          )
-        : [];
+      const allB = categoryB ? (categoryB as any).series.flatMap((s: any) =>
+        s.questions.map((q: any) => ({
+          id: q.id, order: q.order, image: q.image || '', audio: q.audio || '',
+          video: q.video || '', duration: q.duration || 30,
+          responses: q.responses.map((r: any) => ({
+            id: r.id, order: r.order, text: r.text || '', image: r.image || '', isCorrect: !!r.isCorrect,
+          })),
+        }))
+      ) : [];
 
-      const allOtherQuestions = categoryOther
-        ? categoryOther.series.flatMap(s =>
-            s.questions.map(q => ({
-              id: q.id,
-              order: q.order,
-              image: toSupabaseUrl(q.image),
-              audio: toSupabaseUrl(q.audio),
-              video: toSupabaseUrl(q.video),
-              duration: q.duration,
-              responses: q.responses.map(r => ({
-                id: r.id,
-                order: r.order,
-                text: r.text,
-                image: toSupabaseUrl(r.image),
-                isCorrect: r.isCorrect,
-              })),
-            }))
-          )
-        : [];
+      const allOther = categoryOther ? (categoryOther as any).series.flatMap((s: any) =>
+        s.questions.map((q: any) => ({
+          id: q.id, order: q.order, image: q.image || '', audio: q.audio || '',
+          video: q.video || '', duration: q.duration || 30,
+          responses: q.responses.map((r: any) => ({
+            id: r.id, order: r.order, text: r.text || '', image: r.image || '', isCorrect: !!r.isCorrect,
+          })),
+        }))
+      ) : [];
 
-      // Shuffle B, prendre 36
-      shuffleArray(allBQuestions);
-      const selectedB = allBQuestions.slice(0, 36);
-
-      // Shuffle other, prendre 10
-      shuffleArray(allOtherQuestions);
-      const selectedOther = allOtherQuestions.slice(0, 10);
-
-      // Combiner et reshuffle final
-      const combined = [...selectedB, ...selectedOther];
-      shuffleArray(combined);
-      questions.push(...combined);
+      shuffleArray(allB);
+      shuffleArray(allOther);
+      questions.push(...allB.slice(0, 36));
+      questions.push(...allOther.slice(0, 10));
     }
 
-    return NextResponse.json({ questions });
-  } catch (error) {
-    console.error('Error fetching melange questions:', error);
-    return NextResponse.json({ error: 'Failed to fetch questions' }, { status: 500 });
+    shuffleArray(questions);
+    return questions;
+  } catch {
+    return [];
   }
 }
 

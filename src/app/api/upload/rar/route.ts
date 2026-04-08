@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
+import { saveSerieQuestions } from '@/lib/series-file';
 
 // Lazy load database - only when needed
 async function getDb() {
@@ -190,8 +191,18 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
   const seriesDir = path.join(uploadsDir, `series/${categoryCode}/${serieNumber}`);
   const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false, compressed: 0, savedBytes: 0 };
   let questionsImported = 0;
+  let fileErrors: string[] = [];
 
   try {
+    // Ensure upload directories exist
+    try {
+      fs.mkdirSync(seriesDir, { recursive: true });
+    } catch (dirErr) {
+      const msg = `Cannot create directory ${seriesDir}: ${dirErr}`;
+      console.error('[Import]', msg);
+      fileErrors.push(msg);
+    }
+
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
@@ -237,38 +248,45 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
         continue;
       }
 
-      if (isQuestionImage(entryName, entryNameFull)) {
-        const dirPath = path.join(seriesDir, 'images');
-        await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
-        extractedFiles.images++;
-        continue;
-      }
+      // Extract files with individual error handling
+      try {
+        if (isQuestionImage(entryName, entryNameFull)) {
+          const dirPath = path.join(seriesDir, 'images');
+          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
+          extractedFiles.images++;
+          continue;
+        }
 
-      if (isResponseImage(entryName, entryNameFull)) {
-        const dirPath = path.join(seriesDir, 'responses');
-        await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
-        extractedFiles.responses++;
-        continue;
-      }
+        if (isResponseImage(entryName, entryNameFull)) {
+          const dirPath = path.join(seriesDir, 'responses');
+          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
+          extractedFiles.responses++;
+          continue;
+        }
 
-      if (isAudioFile(entryName, entryNameFull)) {
-        const dirPath = path.join(seriesDir, 'audio');
-        fs.mkdirSync(dirPath, { recursive: true });
-        fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-        extractedFiles.audio++;
-        continue;
-      }
+        if (isAudioFile(entryName, entryNameFull)) {
+          const dirPath = path.join(seriesDir, 'audio');
+          fs.mkdirSync(dirPath, { recursive: true });
+          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          extractedFiles.audio++;
+          continue;
+        }
 
-      if (isVideoFile(entryName, entryNameFull)) {
-        const dirPath = path.join(seriesDir, 'video');
-        fs.mkdirSync(dirPath, { recursive: true });
-        fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
-        extractedFiles.video++;
-        continue;
+        if (isVideoFile(entryName, entryNameFull)) {
+          const dirPath = path.join(seriesDir, 'video');
+          fs.mkdirSync(dirPath, { recursive: true });
+          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          extractedFiles.video++;
+          continue;
+        }
+      } catch (fileErr) {
+        const msg = `Error saving ${baseNameOriginal}: ${fileErr}`;
+        console.warn('[Import]', msg);
+        fileErrors.push(msg);
       }
     }
 
-    // Process TXT and create DB entries
+    // Process TXT and create entries - PRIMARY: JSON file, SECONDARY: DB
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
       questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber);
     }
@@ -298,32 +316,17 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       savedFormatted: formatSize(extractedFiles.savedBytes),
     },
     questionsImported,
+    fileErrors: fileErrors.length > 0 ? fileErrors : undefined,
   };
 }
 
-// Process TXT content and create questions (LOCAL mode - uses /api/serve/ URLs)
+// Process TXT content and create questions (LOCAL mode)
+// PRIMARY: JSON file storage (reliable, no DB dependency)
+// SECONDARY: SQLite DB (may fail in Electron)
 async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number): Promise<number> {
-  const db = await getDb();
   const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const questions: { order: number; imageUrl: string; audioUrl: string; correctAnswers: string }[] = [];
 
-  let category = await db.category.findUnique({ where: { code: categoryCode } });
-  if (!category) {
-    category = await db.category.create({ data: { code: categoryCode, name: getCategoryName(categoryCode), nameAr: getCategoryNameAr(categoryCode) } });
-  }
-
-  let serie = await db.serie.findFirst({ where: { categoryId: category.id, number: serieNumber } });
-  if (!serie) {
-    serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
-  }
-
-  // Delete existing: first responses per question, then questions
-  const existingQuestions = await db.question.findMany({ where: { serieId: serie.id } });
-  for (const q of existingQuestions as any[]) {
-    try { await db.response.deleteMany({ where: { questionId: q.id } }); } catch {}
-  }
-  await db.question.deleteMany({ where: { serieId: serie.id } });
-
-  let imported = 0;
   for (const line of lines) {
     const parts = line.split(/[\t\s,;]+/).filter(p => p);
     if (parts.length < 2) continue;
@@ -331,31 +334,73 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
     const correctAnswers = parts[1];
     if (isNaN(questionNumber)) continue;
 
-    // Use local /api/serve/ URLs instead of Supabase URLs
-    const imageUrl = `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`;
-    const audioUrl = `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`;
-
-    const question = await db.question.create({
-      data: {
-        serieId: serie.id,
-        order: questionNumber,
-        image: imageUrl,
-        audio: audioUrl,
-        video: null,
-        text: '',
-      },
+    questions.push({
+      order: questionNumber,
+      imageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`,
+      audioUrl: `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`,
+      correctAnswers,
     });
-
-    for (let j = 1; j <= 4; j++) {
-      await db.response.create({
-        data: { questionId: question.id, order: j, text: `Réponse ${j}`, isCorrect: correctAnswers.includes(String(j)) },
-      });
-    }
-    imported++;
   }
 
-  await db.serie.update({ where: { id: serie.id }, data: { questionsCount: imported } });
-  return imported;
+  if (questions.length === 0) return 0;
+
+  // PRIMARY: Save to JSON file (always works, no dependencies)
+  const jsonResult = saveSerieQuestions(categoryCode, serieNumber, questions);
+  console.log(`[Import] Saved ${jsonResult.questionsImported} questions to JSON file for ${categoryCode}/${serieNumber}`);
+
+  // SECONDARY: Also try to save to DB (for compatibility)
+  try {
+    const db = await getDb();
+    let category = await db.category.findUnique({ where: { code: categoryCode } });
+    if (!category) {
+      category = await db.category.create({ data: { code: categoryCode, name: getCategoryName(categoryCode), nameAr: getCategoryNameAr(categoryCode) } });
+    }
+
+    let serie = await db.serie.findFirst({ where: { categoryId: category.id, number: serieNumber } });
+    if (!serie) {
+      serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
+    }
+
+    // Delete existing: first responses per question, then questions
+    const existingQuestions = await db.question.findMany({ where: { serieId: serie.id } });
+    for (const q of existingQuestions as any[]) {
+      try { await db.response.deleteMany({ where: { questionId: q.id } }); } catch {}
+    }
+    await db.question.deleteMany({ where: { serieId: serie.id } });
+
+    let imported = 0;
+    for (const q of questions) {
+      try {
+        const question = await db.question.create({
+          data: {
+            serieId: serie.id,
+            order: q.order,
+            image: q.imageUrl,
+            audio: q.audioUrl,
+            video: null,
+            text: '',
+          },
+        });
+        for (let j = 1; j <= 4; j++) {
+          await db.response.create({
+            data: { questionId: question.id, order: j, text: `Réponse ${j}`, isCorrect: q.correctAnswers.includes(String(j)) },
+          });
+        }
+        imported++;
+      } catch (dbQErr) {
+        console.warn('[Import] DB question save failed (JSON file already has it):', dbQErr);
+      }
+    }
+
+    try {
+      await db.serie.update({ where: { id: serie.id }, data: { questionsCount: imported } });
+    } catch {}
+    console.log(`[Import] Also saved ${imported} questions to DB for ${categoryCode}/${serieNumber}`);
+  } catch (dbErr) {
+    console.log('[Import] DB save failed (JSON file is the primary storage):', dbErr);
+  }
+
+  return questions.length;
 }
 
 // =====================================================
