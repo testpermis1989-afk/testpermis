@@ -4,10 +4,13 @@ import AdmZip from 'adm-zip';
 import { getUploadBuffer, getUploadJob, deleteUploadJob, hasUploadJob } from '@/lib/upload-store';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
-let jimpModule: typeof import('jimp') | null = null;
+let jimpModule: any = null;
 function getJimp() {
   if (!jimpModule) {
-    try { jimpModule = require('jimp'); } catch (e) {
+    try {
+      jimpModule = require('jimp');
+      if (!jimpModule.Jimp) jimpModule = null;
+    } catch (e) {
       console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
@@ -88,11 +91,12 @@ export async function POST(request: NextRequest) {
           const isCorrupted = !isValidImage(fileData);
           try {
             // Jimp can process Buffers directly - no temp files needed
-            const Jimp = getJimp();
-            if (!Jimp) continue; // Skip compression if Jimp not available
+            const JimpMod = getJimp();
+            if (!JimpMod) continue; // Skip compression if Jimp not available
+            const Jimp = JimpMod.Jimp;
             const image = await Jimp.read(fileData);
-            image.scaleToFit(1024, 1024);
-            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            image.scaleToFit({ w: 1024, h: 1024 });
+            const outputBuffer = await image.getBuffer('image/jpeg');
 
             const newBaseName = baseName.replace(/\.[^.]+$/, '.jpg');
             newZip.addFile(stripParent + dirName + newBaseName, outputBuffer);

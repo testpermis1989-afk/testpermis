@@ -3529,17 +3529,31 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                           {verificationResult.errors.some(e => e.toLowerCase().includes('corrompu')) && (
                             <button
                               onClick={async () => {
-                                if (!pendingImportId) return;
+                                const isDesktop = window.electronAPI?.isDesktop?.() || process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
+                                if (isDesktop && !mediaFile) return;
+                                if (!isDesktop && !pendingImportId) return;
                                 const btn = (event?.target as HTMLButtonElement);
                                 const origText = btn?.textContent || '';
                                 if (btn) btn.textContent = '⏳ Réparation en cours...';
                                 try {
                                   // 1) Réparer les fichiers corrompus
-                                  const res = await fetch('/api/upload/rar/repair', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ importId: pendingImportId }),
-                                  });
+                                  let res: Response;
+                                  if (isDesktop) {
+                                    // Desktop: send ZIP as FormData directly
+                                    const formData = new FormData();
+                                    formData.append('file', mediaFile!);
+                                    res = await fetch('/api/upload/rar/repair', {
+                                      method: 'POST',
+                                      body: formData,
+                                    });
+                                  } else {
+                                    // Cloud: send importId
+                                    res = await fetch('/api/upload/rar/repair', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ importId: pendingImportId }),
+                                    });
+                                  }
                                   const data = await res.json();
                                   if (!res.ok) {
                                     alert('❌ ' + (data.error || 'Erreur lors de la réparation'));
@@ -3547,23 +3561,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                     return;
                                   }
 
-                                  // 2) Re-vérifier après réparation
-                                  if (btn) btn.textContent = '⏳ Vérification...';
-                                  const verifyRes = await fetch('/api/upload/rar/verify', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ importId: pendingImportId }),
-                                  });
-                                  let newVerification = verificationResult;
-                                  if (verifyRes.ok) {
-                                    const verifyData = await verifyRes.json();
-                                    if (verifyData.verification) {
-                                      setVerificationResult(verifyData.verification);
-                                      newVerification = verifyData.verification;
-                                    }
-                                  }
-
-                                  // 3) Afficher le résultat de la réparation
+                                  // 2) Afficher le résultat de la réparation
                                   const { summary, report } = data;
                                   let msg = '✅ Réparation terminée!\n';
                                   msg += `📁 ${summary.totalRepaired} fichier(s) réparé(s)\n`;
@@ -3577,24 +3575,48 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                     msg += '\n❌ Supprimés (irréparables):\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
                                   }
                                   if (report.skipped && report.skipped.length > 0) {
-                                    msg += '\n⏭️ Conservés (non réparables):\n' + report.skipped.map((r: string) => '  • ' + r).join('\n');
+                                    msg += '\n⏭️ Conservés:\n' + report.skipped.map((r: string) => '  • ' + r).join('\n');
                                   }
 
-                                  // 4) Vérifier s'il reste des erreurs (autres que fichiers manquants)
-                                  const remainingErrors = newVerification.errors.filter(e => !e.toLowerCase().includes('corrompu'));
-                                  const hasOnlyMissing = remainingErrors.length === 0 && 
-                                    (newVerification.images.missing.length > 0 || newVerification.audio.missing.length > 0 || newVerification.responses.missing.length > 0);
-
-                                  if (newVerification.isValid || hasOnlyMissing) {
-                                    // 5) Import directly without compression
+                                  // 3) In desktop mode: re-import with the repaired ZIP
+                                  if (isDesktop && data.zipBuffer) {
                                     msg += '\n✅ Import en cours...';
                                     alert(msg);
                                     if (btn) btn.textContent = '⏳ Import...';
+                                    setShowVerificationModal(false);
                                     setCompressBeforeImport(null);
-                                    handleImport(pendingImportId);
-                                  } else {
-                                    // Il reste des erreurs non-résolues
-                                    msg += '\n\n⚠️ Des erreurs subsistent. Vérifiez le tableau ci-dessus.';
+
+                                    // Import the repaired ZIP directly
+                                    const binaryStr = atob(data.zipBuffer);
+                                    const bytes = new Uint8Array(binaryStr.length);
+                                    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                                    const repairedBlob = new Blob([bytes], { type: 'application/zip' });
+                                    const repairedFile = new File([repairedBlob], mediaFile!.name, { type: 'application/zip' });
+
+                                    const importForm = new FormData();
+                                    importForm.append('file', repairedFile);
+                                    importForm.append('category', category);
+                                    importForm.append('serie', serie.toString());
+                                    const importRes = await fetch('/api/upload/rar', {
+                                      method: 'POST',
+                                      body: importForm,
+                                    });
+                                    const importData = await importRes.json();
+                                    if (importData.success) {
+                                      loadSeriesData();
+                                      setImportConfirmation({
+                                        category,
+                                        serie,
+                                        message: importData.message || 'Import réussi après réparation!',
+                                        extracted: importData.extracted || { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false },
+                                        compression: importData.compression || { imagesCompressed: 0, savedBytes: 0, savedFormatted: '0 B' },
+                                        questionsImported: importData.questionsImported || 0,
+                                      });
+                                    } else {
+                                      alert('❌ Erreur import après réparation: ' + (importData.error || ''));
+                                    }
+                                  } else if (isDesktop) {
+                                    msg += '\n\n⚠️ Impossible de ré-importer (ZIP non retourné)';
                                     alert(msg);
                                   }
                                 } catch {

@@ -4,10 +4,13 @@ import { db } from '@/lib/db';
 import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
-let jimpModule: typeof import('jimp') | null = null;
+let jimpModule: any = null;
 function getJimp() {
   if (!jimpModule) {
-    try { jimpModule = require('jimp'); } catch (e) {
+    try {
+      jimpModule = require('jimp');
+      if (!jimpModule.Jimp) jimpModule = null;
+    } catch (e) {
       console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
@@ -97,13 +100,14 @@ export async function POST(request: NextRequest) {
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.jpg');
 
-          const Jimp = getJimp();
-          if (!Jimp) continue; // Skip if Jimp not available
+          const JimpMod = getJimp();
+          if (!JimpMod) continue; // Skip if Jimp not available
           try {
             // Jimp with Buffers - no filesystem needed!
+            const Jimp = JimpMod.Jimp;
             const image = await Jimp.read(fileData);
-            image.scaleToFit(1024, 1024);
-            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            image.scaleToFit({ w: 1024, h: 1024 });
+            const outputBuffer = await image.getBuffer('image/jpeg');
 
             const newSize = outputBuffer.length;
 
@@ -141,12 +145,13 @@ export async function POST(request: NextRequest) {
           const originalSize = fileData.length;
           const outName = file.replace(/\.[^.]+$/, '.jpg');
 
-          const Jimp = getJimp();
-          if (!Jimp) continue; // Skip if Jimp not available
+          const JimpMod = getJimp();
+          if (!JimpMod) continue; // Skip if Jimp not available
           try {
+            const Jimp = JimpMod.Jimp;
             const image = await Jimp.read(fileData);
-            image.scaleToFit(1024, 1024);
-            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            image.scaleToFit({ w: 1024, h: 1024 });
+            const outputBuffer = await image.getBuffer('image/jpeg');
 
             const newSize = outputBuffer.length;
 

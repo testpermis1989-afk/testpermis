@@ -4,14 +4,32 @@ import fs from 'fs';
 import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
-let jimpModule: typeof import('jimp') | null = null;
+let jimpModule: any = null;
 function getJimp() {
   if (!jimpModule) {
-    try { jimpModule = require('jimp'); } catch (e) {
+    try {
+      jimpModule = require('jimp');
+      if (!jimpModule.Jimp) jimpModule = null;
+    } catch (e) {
       console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
   return jimpModule;
+}
+
+// Helper: compress/repair image using Jimp v1.x API
+async function jimpCompress(fileData: Buffer): Promise<Buffer | null> {
+  const JimpMod = getJimp();
+  if (!JimpMod) return null;
+  try {
+    const Jimp = JimpMod.Jimp;
+    const image = await Jimp.read(fileData);
+    image.scaleToFit({ w: 1024, h: 1024 });
+    const outputBuffer = await image.getBuffer('image/jpeg');
+    return outputBuffer;
+  } catch {
+    return null;
+  }
 }
 
 // POST /api/series/repair - Réparer les fichiers corrompus d'une série existante
@@ -49,31 +67,23 @@ export async function POST(request: NextRequest) {
           if (isValidImage(fileData)) continue; // Déjà valide
 
           // Réparer avec Jimp (Buffer-based, no native binaries!)
-          const Jimp = getJimp();
-          if (!Jimp) {
+          const outputBuffer = await jimpCompress(fileData);
+          if (!outputBuffer) {
             report.removed.push(`images/${img} — Corrompue (Jimp non disponible)`);
             continue;
           }
-          try {
-            const image = await Jimp.read(fileData);
-            image.scaleToFit(1024, 1024);
-            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            if (outputBuffer.length > 0) {
-              const newImgName = img.replace(/\.[^.]+$/, '.jpg');
-              const newStoragePath = `${imagesFolder}/${newImgName}`;
-              await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
-              report.repaired.push(`images/${img} → ${newImgName} ✓`);
+          if (outputBuffer.length > 0) {
+            const newImgName = img.replace(/\.[^.]+$/, '.jpg');
+            const newStoragePath = `${imagesFolder}/${newImgName}`;
+            await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
+            report.repaired.push(`images/${img} → ${newImgName} ✓`);
 
-              // Remove old file if name changed
-              if (newImgName !== img) {
-                try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
-              }
-            } else {
+            // Remove old file if name changed
+            if (newImgName !== img) {
               try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
-              report.removed.push(`images/${img}`);
             }
-          } catch {
+          } else {
             try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
             report.removed.push(`images/${img}`);
           }
@@ -96,29 +106,21 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(respStoragePath);
           if (isValidImage(fileData)) continue;
 
-          const Jimp = getJimp();
-          if (!Jimp) {
+          const outputBuffer = await jimpCompress(fileData);
+          if (!outputBuffer) {
             report.removed.push(`responses/${resp} — Corrompue (Jimp non disponible)`);
             continue;
           }
-          try {
-            const image = await Jimp.read(fileData);
-            image.scaleToFit(1024, 1024);
-            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            if (outputBuffer.length > 0) {
-              const newRespName = resp.replace(/\.[^.]+$/, '.jpg');
-              const newStoragePath = `${responsesFolder}/${newRespName}`;
-              await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
-              report.repaired.push(`responses/${resp} → ${newRespName} ✓`);
-              if (newRespName !== resp) {
-                try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
-              }
-            } else {
+          if (outputBuffer.length > 0) {
+            const newRespName = resp.replace(/\.[^.]+$/, '.jpg');
+            const newStoragePath = `${responsesFolder}/${newRespName}`;
+            await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
+            report.repaired.push(`responses/${resp} → ${newRespName} ✓`);
+            if (newRespName !== resp) {
               try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
-              report.removed.push(`responses/${resp}`);
             }
-          } catch {
+          } else {
             try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
             report.removed.push(`responses/${resp}`);
           }
@@ -141,7 +143,6 @@ export async function POST(request: NextRequest) {
           if (isValidMp3(fileData)) continue; // Déjà valide
 
           if (fileData.length > 1000) {
-            // Audio avec headers non standards mais données présentes
             report.skipped.push(`audio/${audio} — Conservé (headers non standards)`);
           } else {
             try { await supabase.storage.from('uploads').remove([audioStoragePath]); } catch {}
@@ -166,7 +167,6 @@ export async function POST(request: NextRequest) {
           if (isValidMp4(fileData)) continue; // Déjà valide
 
           if (fileData.length > 10000) {
-            // Vidéo avec container non standard mais données présentes
             report.skipped.push(`video/${video} — Conservée (container non standard)`);
           } else {
             try { await supabase.storage.from('uploads').remove([videoStoragePath]); } catch {}
@@ -195,25 +195,17 @@ export async function POST(request: NextRequest) {
             const fileData = fs.readFileSync(filePath);
             if (isValidImage(fileData)) continue;
 
-            const Jimp = getJimp();
-            if (!Jimp) continue;
-            try {
-              const image = await Jimp.read(fileData);
-              image.scaleToFit(1024, 1024);
-              const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            const outputBuffer = await jimpCompress(fileData);
+            if (!outputBuffer) continue;
 
-              if (outputBuffer.length > 0) {
-                const newName = file.replace(/\.[^.]+$/, '.jpg');
-                fs.writeFileSync(path.join(localImagesDir, newName), outputBuffer);
-                if (newName !== file) {
-                  try { fs.unlinkSync(filePath); } catch {}
-                }
-                report.repaired.push(`[local] images/${file} → ${newName} ✓`);
-              } else {
+            if (outputBuffer.length > 0) {
+              const newName = file.replace(/\.[^.]+$/, '.jpg');
+              fs.writeFileSync(path.join(localImagesDir, newName), outputBuffer);
+              if (newName !== file) {
                 try { fs.unlinkSync(filePath); } catch {}
-                report.removed.push(`[local] images/${file}`);
               }
-            } catch {
+              report.repaired.push(`[local] images/${file} → ${newName} ✓`);
+            } else {
               try { fs.unlinkSync(filePath); } catch {}
               report.removed.push(`[local] images/${file}`);
             }
@@ -233,25 +225,17 @@ export async function POST(request: NextRequest) {
             const fileData = fs.readFileSync(filePath);
             if (isValidImage(fileData)) continue;
 
-            const Jimp = getJimp();
-            if (!Jimp) continue;
-            try {
-              const image = await Jimp.read(fileData);
-              image.scaleToFit(1024, 1024);
-              const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            const outputBuffer = await jimpCompress(fileData);
+            if (!outputBuffer) continue;
 
-              if (outputBuffer.length > 0) {
-                const newName = file.replace(/\.[^.]+$/, '.jpg');
-                fs.writeFileSync(path.join(localResponsesDir, newName), outputBuffer);
-                if (newName !== file) {
-                  try { fs.unlinkSync(filePath); } catch {}
-                }
-                report.repaired.push(`[local] responses/${file} → ${newName} ✓`);
-              } else {
+            if (outputBuffer.length > 0) {
+              const newName = file.replace(/\.[^.]+$/, '.jpg');
+              fs.writeFileSync(path.join(localResponsesDir, newName), outputBuffer);
+              if (newName !== file) {
                 try { fs.unlinkSync(filePath); } catch {}
-                report.removed.push(`[local] responses/${file}`);
               }
-            } catch {
+              report.repaired.push(`[local] responses/${file} → ${newName} ✓`);
+            } else {
               try { fs.unlinkSync(filePath); } catch {}
               report.removed.push(`[local] responses/${file}`);
             }
@@ -322,9 +306,7 @@ function isValidImage(data: Buffer): boolean {
 
 function isValidMp3(data: Buffer): boolean {
   if (data.length < 10) return false;
-  // ID3 tag header
   if (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) return true;
-  // MPEG audio frame sync
   if (data[0] === 0xFF && (data[1] & 0xE0) === 0xE0) return true;
   return false;
 }

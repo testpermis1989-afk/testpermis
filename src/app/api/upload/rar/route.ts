@@ -23,10 +23,10 @@ const MIME_TYPES: Record<string, string> = {
 
 // Check if Jimp is available for image compression (100% JavaScript, works in Electron)
 let jimpAvailable = false;
-let jimpModule: typeof import('jimp') | null = null;
+let jimpModule: any = null;
 try {
   jimpModule = require('jimp');
-  jimpAvailable = !!jimpModule;
+  jimpAvailable = !!(jimpModule && jimpModule.Jimp && jimpModule.Jimp.read);
   console.log('[Import] Jimp module loaded:', jimpAvailable);
 } catch (e) {
   console.warn('[Import] Jimp module NOT available, images will be saved without compression:', e);
@@ -44,15 +44,16 @@ function getLocalDataDir(): string {
 // Helper: compress image using Jimp (100% JavaScript, no native binaries needed)
 // Outputs JPEG format for maximum compression, works in Electron without issues
 async function compressImage(fileData: Buffer): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
-  if (!jimpAvailable || !jimpModule) {
+  if (!jimpAvailable || !jimpModule || !jimpModule.Jimp) {
     return { data: fileData, compressed: false, savedBytes: 0 };
   }
   try {
-    const image = await jimpModule.read(fileData);
-    // Resize: max 1024px on either side, keep aspect ratio
-    image.scaleToFit(1024, 1024);
-    // Output as JPEG with quality 80 (similar compression to WebP)
-    const compressedData = await image.getBufferAsync(jimpModule.MIME_JPEG);
+    const Jimp = jimpModule.Jimp;
+    const image = await Jimp.read(fileData);
+    // Resize: max 1024px on either side, keep aspect ratio (Jimp v1.x uses {w, h} object)
+    image.scaleToFit({ w: 1024, h: 1024 });
+    // Output as JPEG (Jimp v1.x: getBuffer is async, returns Buffer)
+    const compressedData = await image.getBuffer('image/jpeg');
     return {
       data: compressedData,
       compressed: true,
