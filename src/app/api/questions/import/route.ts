@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import * as xlsx from 'xlsx';
-import { getPublicUrl } from '@/lib/supabase';
+
+// Lazy load database - only when needed
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
+
+// Get public URL for media files
+function getFileUrl(storagePath: string): string {
+  if (!storagePath) return '';
+  if (storagePath.startsWith('http')) return storagePath;
+  // In local/Electron mode, serve via API
+  return `/api/serve/${storagePath}`;
+}
 
 // POST /api/questions/import - Import questions from Excel
 export async function POST(request: NextRequest) {
@@ -14,6 +26,8 @@ export async function POST(request: NextRequest) {
     if (!file || !categoryCode || !serieNumber) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
+
+    const db = await getDb();
 
     // Read Excel file
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -48,8 +62,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Clear existing questions in this serie
-    await db.response.deleteMany({ where: { question: { serieId: serie.id } } });
-    await db.question.deleteMany({ where: { serieId: serie.id } });
+    // First get all question IDs in this serie, then delete their responses, then delete questions
+    // (compatible with both Prisma and sql.js local-db)
+    const existingQuestions = await db.question.findMany({ where: { serieId: serie.id } });
+    if (existingQuestions.length > 0) {
+      const qIds = existingQuestions.map((q: any) => q.id);
+      for (const qId of qIds) {
+        try {
+          await db.response.deleteMany({ where: { questionId: qId } });
+        } catch { /* ignore */ }
+      }
+      await db.question.deleteMany({ where: { serieId: serie.id } });
+    }
 
     // Import questions
     let imported = 0;
@@ -62,7 +86,7 @@ export async function POST(request: NextRequest) {
 
       if (isNaN(questionNumber)) continue;
 
-      // Create question with Supabase Storage public URLs
+      // Create question with local file URLs
       const imageStoragePath = `series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`;
       const audioStoragePath = `series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`;
       const responseStoragePath = `series/${categoryCode}/${serieNumber}/responses/r${questionNumber}.png`;
@@ -71,9 +95,9 @@ export async function POST(request: NextRequest) {
         data: {
           serieId: serie.id,
           order: questionNumber,
-          image: getPublicUrl(imageStoragePath),
-          audio: getPublicUrl(audioStoragePath),
-          text: getPublicUrl(responseStoragePath),
+          image: getFileUrl(imageStoragePath),
+          audio: getFileUrl(audioStoragePath),
+          text: getFileUrl(responseStoragePath),
         },
       });
 
@@ -107,25 +131,28 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Import error:', error);
-    return NextResponse.json({ error: 'Import failed' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Import failed: ' + (error instanceof Error ? error.message : String(error)) },
+      { status: 500 }
+    );
   }
 }
 
-// GET /api/questions/import - Get import status
+// GET /api/questions/import - Get import status (list categories with series)
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const categoryCode = searchParams.get('category');
     const serieNumber = searchParams.get('serie');
 
+    const db = await getDb();
+
     if (!categoryCode) {
       // Get all categories with their series
       const categories = await db.category.findMany({
         include: {
           series: {
-            include: {
-              _count: { select: { questions: true } },
-            },
+            _count: true,
           },
         },
       });
@@ -139,12 +166,7 @@ export async function GET(request: NextRequest) {
         include: {
           series: {
             where: { number: parseInt(serieNumber) },
-            include: {
-              questions: {
-                include: { responses: true },
-                orderBy: { order: 'asc' },
-              },
-            },
+            _includeQuestions: true,
           },
         },
       });
@@ -154,7 +176,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   } catch (error) {
     console.error('Error fetching import status:', error);
-    return NextResponse.json({ error: 'Failed to fetch' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch: ' + (error instanceof Error ? error.message : String(error)) },
+      { status: 500 }
+    );
   }
 }
 

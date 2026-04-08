@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { toSupabaseUrl } from '@/lib/supabase';
 
 // GET /api/questions - Get questions for a serie
 export async function GET(request: NextRequest) {
@@ -13,43 +11,36 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { db } = await import('@/lib/db');
+
     const category = await db.category.findUnique({
       where: { code: categoryCode },
       include: {
         series: {
           where: { number: parseInt(serieNumber) },
-          include: {
-            questions: {
-              include: {
-                responses: {
-                  orderBy: { order: 'asc' },
-                },
-              },
-              orderBy: { order: 'asc' },
-            },
-          },
+          _includeQuestions: true,
         },
       },
     });
 
-    if (!category || category.series.length === 0) {
+    if (!category || !category.series || (category.series as any[]).length === 0) {
       return NextResponse.json({ error: 'Serie not found', questions: [] });
     }
 
-    const serie = category.series[0];
-    const questions = serie.questions.map((q) => ({
+    const serie = (category.series as any[])[0];
+    const questions = (serie.questions || []).map((q: any) => ({
       id: q.id,
       order: q.order,
-      image: toSupabaseUrl(q.image),
-      audio: toSupabaseUrl(q.audio),
-      video: toSupabaseUrl(q.video),
-      duration: q.duration,
-      responses: q.responses.map((r) => ({
+      image: q.image || '',
+      audio: q.audio || '',
+      video: q.video || '',
+      duration: q.duration || 30,
+      responses: (q.responses || []).map((r: any) => ({
         id: r.id,
         order: r.order,
-        text: r.text,
-        image: toSupabaseUrl(r.image),
-        isCorrect: r.isCorrect,
+        text: r.text || '',
+        image: r.image || '',
+        isCorrect: !!r.isCorrect,
       })),
     }));
 
@@ -67,6 +58,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error fetching questions:', error);
-    return NextResponse.json({ error: 'Failed to fetch questions' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch questions: ' + (error instanceof Error ? error.message : String(error)) },
+      { status: 500 }
+    );
   }
 }

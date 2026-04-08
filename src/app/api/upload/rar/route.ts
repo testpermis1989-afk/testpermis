@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
-import { db } from '@/lib/db';
+
+// Lazy load database - only when needed
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -298,6 +303,7 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 
 // Process TXT content and create questions (LOCAL mode - uses /api/serve/ URLs)
 async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number): Promise<number> {
+  const db = await getDb();
   const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
 
   let category = await db.category.findUnique({ where: { code: categoryCode } });
@@ -310,7 +316,11 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
     serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
   }
 
-  await db.response.deleteMany({ where: { question: { serieId: serie.id } } });
+  // Delete existing: first responses per question, then questions
+  const existingQuestions = await db.question.findMany({ where: { serieId: serie.id } });
+  for (const q of existingQuestions as any[]) {
+    try { await db.response.deleteMany({ where: { questionId: q.id } }); } catch {}
+  }
   await db.question.deleteMany({ where: { serieId: serie.id } });
 
   let imported = 0;
@@ -331,156 +341,6 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
         order: questionNumber,
         image: imageUrl,
         audio: audioUrl,
-        video: null,
-        text: '',
-      },
-    });
-
-    for (let j = 1; j <= 4; j++) {
-      await db.response.create({
-        data: { questionId: question.id, order: j, text: `Réponse ${j}`, isCorrect: correctAnswers.includes(String(j)) },
-      });
-    }
-    imported++;
-  }
-
-  await db.serie.update({ where: { id: serie.id }, data: { questionsCount: imported } });
-  return imported;
-}
-
-// =====================================================
-// CLOUD MODE: Extract ZIP to Supabase Storage + save to DB
-// (kept for backward compatibility, but won't be used in desktop)
-// =====================================================
-async function extractAndImportCloud(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
-  // Dynamic import for cloud-only modules
-  const { uploadFile, getPublicUrl } = await import('@/lib/supabase');
-
-  const storagePrefix = `series/${categoryCode}/${serieNumber}`;
-  const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtFile: false as string | false };
-  let questionsImported = 0;
-
-  try {
-    const zip = new AdmZip(zipBuffer);
-    const entries = zip.getEntries();
-
-    const topLevelDirs = new Set<string>();
-    for (const entry of entries) {
-      const parts = entry.entryName.split('/').filter(Boolean);
-      if (parts.length >= 2) topLevelDirs.add(parts[0].toLowerCase());
-    }
-    let stripParent = '';
-    if (topLevelDirs.size === 1) stripParent = [...topLevelDirs][0] + '/';
-
-    for (const entry of entries) {
-      if (entry.isDirectory) continue;
-
-      let entryNameFull = entry.entryName;
-      let entryName = entryNameFull.toLowerCase();
-      if (stripParent && entryName.startsWith(stripParent)) {
-        entryNameFull = entryNameFull.substring(stripParent.length);
-        entryName = entryNameFull.toLowerCase();
-      }
-      const baseNameOriginal = path.basename(entryNameFull);
-
-      if (entryName.endsWith('.txt') && (
-        entryName.includes('reponse') || entryName.includes('response') ||
-        entryName.includes('answer') || entryName.includes('question') ||
-        entryName === 'data.txt' || entryName.match(/^[^\/]+\.txt$/) ||
-        baseNameOriginal.toLowerCase().startsWith('repons') ||
-        baseNameOriginal.toLowerCase().startsWith('answer') ||
-        baseNameOriginal.toLowerCase() === 'data.txt'
-      )) {
-        extractedFiles.txtFile = entry.getData().toString('utf-8');
-        continue;
-      }
-
-      let fileData: Buffer;
-      try { fileData = entry.getData(); } catch { continue; }
-
-      if (isQuestionImage(entryName, entryNameFull)) {
-        const storagePath = `${storagePrefix}/images/${baseNameOriginal}`;
-        const ext = path.extname(baseNameOriginal).toLowerCase();
-        const mime = MIME_TYPES[ext] || 'image/png';
-        try { await uploadFile(storagePath, fileData, mime); } catch (err) { console.error(`Failed to upload image ${baseNameOriginal}:`, err); }
-        extractedFiles.images++;
-        continue;
-      }
-      if (isResponseImage(entryName, entryNameFull)) {
-        const storagePath = `${storagePrefix}/responses/${baseNameOriginal}`;
-        const ext = path.extname(baseNameOriginal).toLowerCase();
-        const mime = MIME_TYPES[ext] || 'image/png';
-        try { await uploadFile(storagePath, fileData, mime); } catch (err) { console.error(`Failed to upload response ${baseNameOriginal}:`, err); }
-        extractedFiles.responses++;
-        continue;
-      }
-      if (isAudioFile(entryName, entryNameFull)) {
-        const storagePath = `${storagePrefix}/audio/${baseNameOriginal}`;
-        try { await uploadFile(storagePath, fileData, 'audio/mpeg'); } catch (err) { console.error(`Failed to upload audio ${baseNameOriginal}:`, err); }
-        extractedFiles.audio++;
-        continue;
-      }
-      if (isVideoFile(entryName, entryNameFull)) {
-        const storagePath = `${storagePrefix}/video/${baseNameOriginal}`;
-        try { await uploadFile(storagePath, fileData, 'video/mp4'); } catch (err) { console.error(`Failed to upload video ${baseNameOriginal}:`, err); }
-        extractedFiles.video++;
-        continue;
-      }
-    }
-
-    if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
-      questionsImported = await processTxtContentCloud(extractedFiles.txtFile, categoryCode, serieNumber, storagePrefix);
-    }
-  } catch (error) {
-    console.error('Cloud extraction error:', error);
-    throw error;
-  }
-
-  return {
-    message: 'Fichier traité avec succès!',
-    extracted: {
-      images: extractedFiles.images,
-      audio: extractedFiles.audio,
-      video: extractedFiles.video,
-      responses: extractedFiles.responses,
-      txtProcessed: extractedFiles.txtFile !== false,
-    },
-    questionsImported,
-  };
-}
-
-async function processTxtContentCloud(txtContent: string, categoryCode: string, serieNumber: number, storagePrefix: string): Promise<number> {
-  const { getPublicUrl } = await import('@/lib/supabase');
-
-  const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-
-  let category = await db.category.findUnique({ where: { code: categoryCode } });
-  if (!category) {
-    category = await db.category.create({ data: { code: categoryCode, name: getCategoryName(categoryCode), nameAr: getCategoryNameAr(categoryCode) } });
-  }
-
-  let serie = await db.serie.findFirst({ where: { categoryId: category.id, number: serieNumber } });
-  if (!serie) {
-    serie = await db.serie.create({ data: { categoryId: category.id, number: serieNumber } });
-  }
-
-  await db.response.deleteMany({ where: { question: { serieId: serie.id } } });
-  await db.question.deleteMany({ where: { serieId: serie.id } });
-
-  let imported = 0;
-  for (const line of lines) {
-    const parts = line.split(/[\t\s,;]+/).filter(p => p);
-    if (parts.length < 2) continue;
-    const questionNumber = parseInt(parts[0]);
-    const correctAnswers = parts[1];
-    if (isNaN(questionNumber)) continue;
-
-    const question = await db.question.create({
-      data: {
-        serieId: serie.id,
-        order: questionNumber,
-        image: getPublicUrl(`${storagePrefix}/images`),
-        audio: getPublicUrl(`${storagePrefix}/audio`),
         video: null,
         text: '',
       },
