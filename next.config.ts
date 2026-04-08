@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ['@prisma/client', 'adm-zip', 'unrar', 'sharp', 'fluent-ffmpeg'],
+  serverExternalPackages: ['@prisma/client', 'adm-zip', 'unrar', 'jimp', 'fluent-ffmpeg'],
   allowedDevOrigins: [
     'preview-chat-03782b20-9da7-447d-a01b-6851e7199e59.space.z.ai',
     '.space.z.ai',
@@ -23,11 +23,6 @@ const nextConfig: NextConfig = {
   // Exclude packages from standalone file tracing to reduce build size
   outputFileTracingExcludes: {
     '*': [
-      // Exclude sharp Linux binaries (app is Windows-only)
-      'node_modules/@img/sharp-libvips-linux-x64/**',
-      'node_modules/@img/sharp-libvips-linuxmusl-x64/**',
-      'node_modules/@img/sharp-linux-x64/**',
-      'node_modules/@img/sharp-linuxmusl-x64/**',
       // Exclude typescript (not needed at runtime)
       'node_modules/typescript/**',
       // Exclude source maps

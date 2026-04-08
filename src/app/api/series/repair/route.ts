@@ -2,19 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
 
-// Lazy load sharp - optional, may not work in Electron's Node.js ABI
-let sharpModule: typeof import('sharp') | null = null;
-function getSharp() {
-  if (!sharpModule) {
-    try { sharpModule = require('sharp'); } catch (e) {
-      console.warn('[sharp] Module not available:', (e as Error).message);
+// Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
+let jimpModule: typeof import('jimp') | null = null;
+function getJimp() {
+  if (!jimpModule) {
+    try { jimpModule = require('jimp'); } catch (e) {
+      console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
-  return sharpModule;
+  return jimpModule;
 }
 
-// POST /api/series/repair - Réparer les fichiers corrompus d'une série existante (from Supabase Storage)
-// Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
+// POST /api/series/repair - Réparer les fichiers corrompus d'une série existante
+// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       errors: [] as string[],
     };
 
-    // Réparer les images (sharp with Buffers - no filesystem needed!)
+    // Réparer les images (Jimp with Buffers - no native binaries needed!)
     const imagesFolder = `${storagePrefix}/images`;
     try {
       const images = await listFiles(imagesFolder);
@@ -45,9 +45,9 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(imgStoragePath);
           if (isValidImage(fileData)) continue; // Déjà valide
 
-          // Réparer avec sharp (Buffer-based, no filesystem!)
-          const sharp = getSharp();
-          if (!sharp) {
+          // Réparer avec Jimp (Buffer-based, no native binaries!)
+          const Jimp = getJimp();
+          if (!Jimp) {
             try {
               await supabase.storage.from('uploads').remove([imgStoragePath]);
             } catch {}
@@ -55,15 +55,14 @@ export async function POST(request: NextRequest) {
             continue;
           }
           try {
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
-              const newImgName = img.replace(/\.[^.]+$/, '.webp');
+            if (outputBuffer.length > 0) {
+              const newImgName = img.replace(/\.[^.]+$/, '.jpg');
               const newStoragePath = `${imagesFolder}/${newImgName}`;
-              await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+              await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
               report.repaired.push(`images/${img} → ${newImgName}`);
 
               // Remove old file if name changed
@@ -103,8 +102,8 @@ export async function POST(request: NextRequest) {
           const fileData = await downloadFile(respStoragePath);
           if (isValidImage(fileData)) continue;
 
-          const sharp = getSharp();
-          if (!sharp) {
+          const Jimp = getJimp();
+          if (!Jimp) {
             try {
               await supabase.storage.from('uploads').remove([respStoragePath]);
             } catch {}
@@ -112,15 +111,14 @@ export async function POST(request: NextRequest) {
             continue;
           }
           try {
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
-              const newRespName = resp.replace(/\.[^.]+$/, '.webp');
+            if (outputBuffer.length > 0) {
+              const newRespName = resp.replace(/\.[^.]+$/, '.jpg');
               const newStoragePath = `${responsesFolder}/${newRespName}`;
-              await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+              await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
               report.repaired.push(`responses/${resp} → ${newRespName}`);
               if (newRespName !== resp) {
                 try {

@@ -3,19 +3,19 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, getUploadJob, deleteUploadJob, hasUploadJob } from '@/lib/upload-store';
 
-// Lazy load sharp - optional, may not work in Electron's Node.js ABI
-let sharpModule: typeof import('sharp') | null = null;
-function getSharp() {
-  if (!sharpModule) {
-    try { sharpModule = require('sharp'); } catch (e) {
-      console.warn('[sharp] Module not available:', (e as Error).message);
+// Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
+let jimpModule: typeof import('jimp') | null = null;
+function getJimp() {
+  if (!jimpModule) {
+    try { jimpModule = require('jimp'); } catch (e) {
+      console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
-  return sharpModule;
+  return jimpModule;
 }
 
-// POST /api/upload/rar/compress - Compress files before import (serverless-compatible)
-// Uses sharp with Buffers (no filesystem), skips ffmpeg (not available on Vercel)
+// POST /api/upload/rar/compress - Compress files before import
+// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -81,21 +81,20 @@ export async function POST(request: NextRequest) {
         const dirName = entryName.substring(0, entryName.length - baseName.length);
         let fileData = entry.getData();
 
-        // Compress images → WebP using sharp with Buffers (no filesystem needed!)
+        // Compress images → JPEG using Jimp with Buffers (no native binaries needed!)
         if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff'].includes(ext)) {
           const isResponse = /repons/i.test(dirName) || /^r\d+/i.test(baseName);
           const originalSize = fileData.length;
           const isCorrupted = !isValidImage(fileData);
           try {
-            // Sharp can process Buffers directly - no temp files needed
-            const sharp = getSharp();
-            if (!sharp) continue; // Skip compression if sharp not available
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            // Jimp can process Buffers directly - no temp files needed
+            const Jimp = getJimp();
+            if (!Jimp) continue; // Skip compression if Jimp not available
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            const newBaseName = baseName.replace(/\.[^.]+$/, '.webp');
+            const newBaseName = baseName.replace(/\.[^.]+$/, '.jpg');
             newZip.addFile(stripParent + dirName + newBaseName, outputBuffer);
             const key = isResponse ? 'responses' : 'images';
             result[key].compressed++;

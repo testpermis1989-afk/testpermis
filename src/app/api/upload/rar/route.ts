@@ -21,15 +21,15 @@ const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
 };
 
-// Check if sharp is available (may not work in some Electron builds)
-let sharpAvailable = false;
-let sharpModule: typeof import('sharp') | null = null;
+// Check if Jimp is available for image compression (100% JavaScript, works in Electron)
+let jimpAvailable = false;
+let jimpModule: typeof import('jimp') | null = null;
 try {
-  sharpModule = require('sharp');
-  sharpAvailable = !!sharpModule;
-  console.log('[Import] Sharp module loaded:', sharpAvailable);
+  jimpModule = require('jimp');
+  jimpAvailable = !!jimpModule;
+  console.log('[Import] Jimp module loaded:', jimpAvailable);
 } catch (e) {
-  console.warn('[Import] Sharp module NOT available, images will be saved without compression:', e);
+  console.warn('[Import] Jimp module NOT available, images will be saved without compression:', e);
 }
 
 // Check if we're in desktop/local mode
@@ -41,17 +41,18 @@ function getLocalDataDir(): string {
   return process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
 }
 
-// Helper: compress image using sharp if available, otherwise return original
-// Always outputs WebP format for maximum compression
+// Helper: compress image using Jimp (100% JavaScript, no native binaries needed)
+// Outputs JPEG format for maximum compression, works in Electron without issues
 async function compressImage(fileData: Buffer): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
-  if (!sharpAvailable || !sharpModule) {
+  if (!jimpAvailable || !jimpModule) {
     return { data: fileData, compressed: false, savedBytes: 0 };
   }
   try {
-    const compressedData = await sharpModule(fileData)
-      .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 80 })
-      .toBuffer();
+    const image = await jimpModule.read(fileData);
+    // Resize: max 1024px on either side, keep aspect ratio
+    image.scaleToFit(1024, 1024);
+    // Output as JPEG with quality 80 (similar compression to WebP)
+    const compressedData = await image.getBufferAsync(jimpModule.MIME_JPEG);
     return {
       data: compressedData,
       compressed: true,
@@ -64,18 +65,18 @@ async function compressImage(fileData: Buffer): Promise<{ data: Buffer; compress
 }
 
 // Helper: process and save an image file
-// Converts to WebP when sharp is available for smaller file sizes
-// targetName: if provided, save with this name (e.g., 'q1.webp'); otherwise use original name
+// Converts to JPEG when Jimp is available for smaller file sizes
+// targetName: if provided, save with this name (e.g., 'q1.jpg'); otherwise use original name
 async function saveImage(dirPath: string, baseNameOriginal: string, fileData: Buffer, stats: { compressed: number; savedBytes: number }, targetName?: string) {
   fs.mkdirSync(dirPath, { recursive: true });
   const ext = path.extname(baseNameOriginal).toLowerCase();
 
   if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) {
     const result = await compressImage(fileData);
-    // Always save as .webp when sharp is available, keep original otherwise
+    // Always save as .jpg when Jimp compresses (JPEG output), keep original otherwise
     const finalName = targetName
-      ? (result.compressed ? targetName.replace(/\.[^.]+$/, '.webp') : targetName)
-      : (result.compressed ? baseNameOriginal.replace(/\.[^.]+$/, '.webp') : baseNameOriginal);
+      ? (result.compressed ? targetName.replace(/\.[^.]+$/, '.jpg') : targetName)
+      : (result.compressed ? baseNameOriginal.replace(/\.[^.]+$/, '.jpg') : baseNameOriginal);
     fs.writeFileSync(path.join(dirPath, finalName), result.data);
     if (result.compressed) {
       stats.compressed++;

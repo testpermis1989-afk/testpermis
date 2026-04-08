@@ -3,19 +3,19 @@ import path from 'path';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, getUploadJob, saveUploadJob, hasUploadJob } from '@/lib/upload-store';
 
-// Lazy load sharp - optional, may not work in Electron's Node.js ABI
-let sharpModule: typeof import('sharp') | null = null;
-function getSharp() {
-  if (!sharpModule) {
-    try { sharpModule = require('sharp'); } catch (e) {
-      console.warn('[sharp] Module not available:', (e as Error).message);
+// Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
+let jimpModule: typeof import('jimp') | null = null;
+function getJimp() {
+  if (!jimpModule) {
+    try { jimpModule = require('jimp'); } catch (e) {
+      console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
-  return sharpModule;
+  return jimpModule;
 }
 
 // POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP
-// Serverless-compatible: uses sharp with Buffers, skips ffmpeg (not available on Vercel)
+// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -80,27 +80,26 @@ export async function POST(request: NextRequest) {
         const dirName = entryName.substring(0, entryName.length - baseName.length);
         let fileData = entry.getData();
 
-        // ===== REPAIR IMAGES (sharp with Buffers - no filesystem needed!) =====
+        // ===== REPAIR IMAGES (Jimp with Buffers - no native binaries needed!) =====
         if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif'].includes(ext)) {
           if (isValidImage(fileData)) {
             newZip.addFile(entry.entryName, fileData);
             continue;
           }
 
-          // Try to repair with sharp
-          const sharp = getSharp();
-          if (!sharp) {
-            report.removed.push(`${baseName} — Image irréparable (sharp non disponible)`);
+          // Try to repair with Jimp
+          const Jimp = getJimp();
+          if (!Jimp) {
+            report.removed.push(`${baseName} — Image irréparable (Jimp non disponible)`);
             continue;
           }
           try {
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-            if (outputBuffer.length > 0 && isValidImage(outputBuffer)) {
-              const newBaseName = baseName.replace(/\.[^.]+$/, '.webp');
+            if (outputBuffer.length > 0) {
+              const newBaseName = baseName.replace(/\.[^.]+$/, '.jpg');
               newZip.addFile(stripParent + dirName + newBaseName, outputBuffer);
               report.repaired.push(`${baseName} → Image réparée`);
             } else {

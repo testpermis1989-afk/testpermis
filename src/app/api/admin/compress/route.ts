@@ -3,15 +3,15 @@ import path from 'path';
 import { db } from '@/lib/db';
 import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
 
-// Lazy load sharp - optional, may not work in Electron's Node.js ABI
-let sharpModule: typeof import('sharp') | null = null;
-function getSharp() {
-  if (!sharpModule) {
-    try { sharpModule = require('sharp'); } catch (e) {
-      console.warn('[sharp] Module not available:', (e as Error).message);
+// Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
+let jimpModule: typeof import('jimp') | null = null;
+function getJimp() {
+  if (!jimpModule) {
+    try { jimpModule = require('jimp'); } catch (e) {
+      console.warn('[jimp] Module not available:', (e as Error).message);
     }
   }
-  return sharpModule;
+  return jimpModule;
 }
 
 // GET /api/admin/compress - Get file stats for a serie from Supabase Storage
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/compress - Compress files in place (Supabase Storage)
-// Serverless-compatible: uses sharp with Buffers, skips ffmpeg
+// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
 export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       responses: { compressed: 0, beforeBytes: 0, afterBytes: 0 },
     };
 
-    // 1. Compress images → WebP max 1024px, qualité 75% (Buffer-based sharp!)
+    // 1. Compress images → JPEG max 1024px, qualité 80% (Jimp - no native binaries!)
     const imagesFolder = `${storagePrefix}/images`;
     try {
       const files = await listFiles(imagesFolder);
@@ -95,21 +95,20 @@ export async function POST(request: NextRequest) {
         try {
           const fileData = await downloadFile(storagePath);
           const originalSize = fileData.length;
-          const outName = file.replace(/\.[^.]+$/, '.webp');
+          const outName = file.replace(/\.[^.]+$/, '.jpg');
 
-          const sharp = getSharp();
-          if (!sharp) continue; // Skip if sharp not available
+          const Jimp = getJimp();
+          if (!Jimp) continue; // Skip if Jimp not available
           try {
-            // Sharp with Buffers - no filesystem needed!
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            // Jimp with Buffers - no filesystem needed!
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
             const newSize = outputBuffer.length;
 
             const newStoragePath = `${imagesFolder}/${outName}`;
-            await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+            await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
 
             // Remove old file if name changed
             if (outName !== file) {
@@ -128,7 +127,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // 2. Compress response images (Buffer-based sharp!)
+    // 2. Compress response images (Jimp - no native binaries!)
     const responsesFolder = `${storagePrefix}/responses`;
     try {
       const files = await listFiles(responsesFolder);
@@ -140,20 +139,19 @@ export async function POST(request: NextRequest) {
         try {
           const fileData = await downloadFile(storagePath);
           const originalSize = fileData.length;
-          const outName = file.replace(/\.[^.]+$/, '.webp');
+          const outName = file.replace(/\.[^.]+$/, '.jpg');
 
-          const sharp = getSharp();
-          if (!sharp) continue; // Skip if sharp not available
+          const Jimp = getJimp();
+          if (!Jimp) continue; // Skip if Jimp not available
           try {
-            const outputBuffer = await sharp(fileData)
-              .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toBuffer();
+            const image = await Jimp.read(fileData);
+            image.scaleToFit(1024, 1024);
+            const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
             const newSize = outputBuffer.length;
 
             const newStoragePath = `${responsesFolder}/${outName}`;
-            await uploadFile(newStoragePath, outputBuffer, 'image/webp');
+            await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
 
             if (outName !== file) {
               try { await supabase.storage.from('uploads').remove([storagePath]); } catch {}
