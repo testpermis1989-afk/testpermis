@@ -65,23 +65,27 @@ async function compressImage(fileData: Buffer): Promise<{ data: Buffer; compress
 
 // Helper: process and save an image file
 // Converts to WebP when sharp is available for smaller file sizes
-async function saveImage(dirPath: string, baseNameOriginal: string, fileData: Buffer, stats: { compressed: number; savedBytes: number }) {
+// targetName: if provided, save with this name (e.g., 'q1.webp'); otherwise use original name
+async function saveImage(dirPath: string, baseNameOriginal: string, fileData: Buffer, stats: { compressed: number; savedBytes: number }, targetName?: string) {
   fs.mkdirSync(dirPath, { recursive: true });
   const ext = path.extname(baseNameOriginal).toLowerCase();
 
   if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) {
     const result = await compressImage(fileData);
     // Always save as .webp when sharp is available, keep original otherwise
-    const savedName = result.compressed
-      ? baseNameOriginal.replace(/\.[^.]+$/, '.webp')
-      : baseNameOriginal;
-    fs.writeFileSync(path.join(dirPath, savedName), result.data);
+    const finalName = targetName
+      ? (result.compressed ? targetName.replace(/\.[^.]+$/, '.webp') : targetName)
+      : (result.compressed ? baseNameOriginal.replace(/\.[^.]+$/, '.webp') : baseNameOriginal);
+    fs.writeFileSync(path.join(dirPath, finalName), result.data);
     if (result.compressed) {
       stats.compressed++;
       stats.savedBytes += result.savedBytes;
     }
+    return finalName; // Return the actual saved filename
   } else {
-    fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+    const finalName = targetName || baseNameOriginal;
+    fs.writeFileSync(path.join(dirPath, finalName), fileData);
+    return finalName;
   }
 }
 
@@ -247,33 +251,43 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       }
 
       // Extract files with individual error handling
+      // CRITICAL: Files are renamed to standardized patterns (q{n}.ext, r{n}.ext)
+      // so the URL templates in processTxtContentLocal match the actual filenames on disk.
       try {
         if (isQuestionImage(entryName, entryNameFull)) {
+          const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'images');
-          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
+          const targetName = qNum ? `q${qNum}${path.extname(baseNameOriginal).toLowerCase()}` : undefined;
+          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles, targetName);
           extractedFiles.images++;
           continue;
         }
 
         if (isResponseImage(entryName, entryNameFull)) {
+          const rNum = extractResponseNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'responses');
-          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles);
+          const targetName = rNum ? `r${rNum}${path.extname(baseNameOriginal).toLowerCase()}` : undefined;
+          await saveImage(dirPath, baseNameOriginal, fileData, extractedFiles, targetName);
           extractedFiles.responses++;
           continue;
         }
 
         if (isAudioFile(entryName, entryNameFull)) {
+          const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'audio');
           fs.mkdirSync(dirPath, { recursive: true });
-          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          const saveName = qNum ? `q${qNum}.mp3` : baseNameOriginal;
+          fs.writeFileSync(path.join(dirPath, saveName), fileData);
           extractedFiles.audio++;
           continue;
         }
 
         if (isVideoFile(entryName, entryNameFull)) {
+          const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'video');
           fs.mkdirSync(dirPath, { recursive: true });
-          fs.writeFileSync(path.join(dirPath, baseNameOriginal), fileData);
+          const saveName = qNum ? `q${qNum}.mp4` : baseNameOriginal;
+          fs.writeFileSync(path.join(dirPath, saveName), fileData);
           extractedFiles.video++;
           continue;
         }
@@ -284,29 +298,29 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
       }
     }
 
-    // Scan extracted directories for actual file extensions
-    const imageExts = scanFileExtensions(
+    // Scan extracted directories for actual filenames on disk
+    const imageFiles = scanFileFilenames(
       path.join(seriesDir, 'images'),
       ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg'],
       extractQuestionNumber
     );
-    const audioExts = scanFileExtensions(
+    const audioFiles = scanFileFilenames(
       path.join(seriesDir, 'audio'),
       ['.mp3', '.wav', '.ogg', '.aac', '.m4a'],
       extractQuestionNumber
     );
-    const responseExts = scanFileExtensions(
+    const responseFiles = scanFileFilenames(
       path.join(seriesDir, 'responses'),
       ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg'],
       extractResponseNumber
     );
-    const videoExts = scanFileExtensions(
+    const videoFiles = scanFileFilenames(
       path.join(seriesDir, 'video'),
       ['.mp4', '.webm', '.avi', '.mov', '.mkv'],
       extractQuestionNumber
     );
 
-    const extensions = { imageExts, audioExts, responseExts, videoExts };
+    const fileNames = { imageFiles, audioFiles, responseFiles, videoFiles };
 
     // Verify files on disk after extraction
     diskStats = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
@@ -326,7 +340,7 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 
     // Process TXT and create entries - PRIMARY: JSON file, SECONDARY: DB
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
-      questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber, extensions);
+      questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber, fileNames);
     }
   } catch (error) {
     console.error('Extraction error:', error);
@@ -362,11 +376,11 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
 // Process TXT content and create questions (LOCAL mode)
 // PRIMARY: JSON file storage (reliable, no DB dependency)
 // SECONDARY: SQLite DB (may fail in Electron)
-async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number, extensions: {
-  imageExts: Map<number, string>;
-  audioExts: Map<number, string>;
-  responseExts: Map<number, string>;
-  videoExts: Map<number, string>;
+async function processTxtContentLocal(txtContent: string, categoryCode: string, serieNumber: number, fileNames: {
+  imageFiles: Map<number, string>;
+  audioFiles: Map<number, string>;
+  responseFiles: Map<number, string>;
+  videoFiles: Map<number, string>;
 }): Promise<number> {
   const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
   const questions: { order: number; imageUrl: string; audioUrl: string; videoUrl: string | null; responseImageUrl: string; correctAnswers: string }[] = [];
@@ -378,17 +392,18 @@ async function processTxtContentLocal(txtContent: string, categoryCode: string, 
     const correctAnswers = parts[1];
     if (isNaN(questionNumber)) continue;
 
-    const imgExt = extensions.imageExts.get(questionNumber) || '.png';
-    const audExt = extensions.audioExts.get(questionNumber) || '.mp3';
-    const resExt = extensions.responseExts.get(questionNumber) || '.png';
-    const vidExt = extensions.videoExts.get(questionNumber) || null;
+    // Use ACTUAL filenames from disk (not template names) to guarantee URL matches
+    const imgFile = fileNames.imageFiles.get(questionNumber);
+    const audFile = fileNames.audioFiles.get(questionNumber);
+    const resFile = fileNames.responseFiles.get(questionNumber);
+    const vidFile = fileNames.videoFiles.get(questionNumber);
 
     questions.push({
       order: questionNumber,
-      imageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}${imgExt}`,
-      audioUrl: `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}${audExt}`,
-      videoUrl: vidExt ? `/api/serve/series/${categoryCode}/${serieNumber}/video/q${questionNumber}${vidExt}` : null,
-      responseImageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/responses/r${questionNumber}${resExt}`,
+      imageUrl: imgFile ? `/api/serve/series/${categoryCode}/${serieNumber}/images/${imgFile}` : `/api/serve/series/${categoryCode}/${serieNumber}/images/q${questionNumber}.png`,
+      audioUrl: audFile ? `/api/serve/series/${categoryCode}/${serieNumber}/audio/${audFile}` : `/api/serve/series/${categoryCode}/${serieNumber}/audio/q${questionNumber}.mp3`,
+      videoUrl: vidFile ? `/api/serve/series/${categoryCode}/${serieNumber}/video/${vidFile}` : null,
+      responseImageUrl: resFile ? `/api/serve/series/${categoryCode}/${serieNumber}/responses/${resFile}` : `/api/serve/series/${categoryCode}/${serieNumber}/responses/r${questionNumber}.png`,
       correctAnswers,
     });
   }
@@ -624,26 +639,27 @@ function extractResponseNumber(filename: string): number | null {
   return match ? parseInt(match[1]) : extractQuestionNumber(filename);
 }
 
-// Scan a directory for file extensions mapped by question number
-function scanFileExtensions(
+// Scan a directory for actual filenames mapped by question number
+// Returns Map<questionNumber, actualFilename> (e.g., 1 -> "q1.webp")
+function scanFileFilenames(
   dirPath: string,
   validExts: string[],
   numExtractor: (filename: string) => number | null
 ): Map<number, string> {
-  const extensions = new Map<number, string>();
+  const filenames = new Map<number, string>();
   try {
-    if (!fs.existsSync(dirPath)) return extensions;
+    if (!fs.existsSync(dirPath)) return filenames;
     const files = fs.readdirSync(dirPath);
     for (const f of files) {
       const ext = path.extname(f).toLowerCase();
       if (!validExts.includes(ext)) continue;
       const num = numExtractor(f);
-      if (num !== null && !extensions.has(num)) {
-        extensions.set(num, ext);
+      if (num !== null && !filenames.has(num)) {
+        filenames.set(num, f);
       }
     }
   } catch {}
-  return extensions;
+  return filenames;
 }
 
 function isQuestionImage(entryName: string, entryNameOriginal: string): boolean {
