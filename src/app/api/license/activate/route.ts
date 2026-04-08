@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { getMachineCode, getMachineHash } from '@/lib/machine-id';
 import { verifyActivationCode } from '@/lib/activation';
+import { readActivationFile, writeActivationFile, deleteActivationFile } from '@/lib/activation-file';
 
 /**
  * POST /api/license/activate
  * Validate an activation code against this machine and store the activation.
  * Uses the same format as the standalone activation tool.
+ *
+ * IMPORTANT: This endpoint works WITHOUT a database.
+ * Activation is stored in a JSON file as fallback (same as activation-tool).
  *
  * Body: { activationCode: string }
  */
@@ -22,11 +25,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get the machine code for validation
+    // Get the machine code for validation (uses os module, works in Electron)
     const machineCode = getMachineCode();
     const machineHash = getMachineHash();
 
-    // Validate the activation code against this machine (same format as activation tool)
+    // Validate the activation code against this machine (pure computation, no DB needed)
     const result = verifyActivationCode(activationCode, machineCode);
 
     if (!result.valid) {
@@ -39,28 +42,29 @@ export async function POST(request: NextRequest) {
     const expiryDate = result.expiresAt!.toISOString();
     const nowISO = new Date().toISOString();
 
-    // Clear any previous activation
-    try {
-      await db.activation.deleteMany();
-    } catch {
-      // Table may not exist yet
-    }
+    // Store activation in JSON file (reliable, no dependencies)
+    const record = {
+      activationCode,
+      machineCode,
+      machineHash,
+      durationCode: String(result.durationDays || 30),
+      durationLabel: result.durationLabel || '',
+      expiryDate,
+      activatedAt: nowISO,
+      expiresAt: expiryDate,
+      lastCheckedAt: nowISO,
+      staleCheckCount: 0,
+    };
+    writeActivationFile(record);
 
-    // Store the new activation record with lastCheckedAt and staleCheckCount
-    await db.activation.create({
-      data: {
-        activationCode,
-        machineCode,
-        machineHash,
-        durationCode: String(result.durationDays || 30),
-        durationLabel: result.durationLabel || '',
-        expiryDate,
-        activatedAt: nowISO,
-        expiresAt: expiryDate,
-        lastCheckedAt: nowISO,
-        staleCheckCount: 0,
-      },
-    });
+    // Also try to store in database (for consistency with other features)
+    try {
+      const { db } = await import('@/lib/db');
+      await db.activation.deleteMany();
+      await db.activation.create({ data: record });
+    } catch (dbErr) {
+      console.log('[/api/license/activate] DB save failed (using JSON file):', dbErr);
+    }
 
     return NextResponse.json({
       success: true,
@@ -70,7 +74,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Activation failed:', error);
     return NextResponse.json(
-      { error: 'Activation failed' },
+      { error: 'Activation failed: ' + (error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
   }
