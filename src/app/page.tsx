@@ -3307,7 +3307,10 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
       if (report.removed.length > 0) {
         msg += '\n❌ Supprimés (irréparables):\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
       }
-      if (summary.totalRepaired === 0 && summary.totalRemoved === 0) {
+      if (report.skipped && report.skipped.length > 0) {
+        msg += '\n⏭️ Conservés:\n' + report.skipped.map((r: string) => '  • ' + r).join('\n');
+      }
+      if (summary.totalRepaired === 0 && summary.totalRemoved === 0 && (!report.skipped || report.skipped.length === 0)) {
         msg += '✨ Tous les fichiers sont déjà valides!';
       }
       alert(msg);
@@ -3573,6 +3576,9 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                   if (report.removed.length > 0) {
                                     msg += '\n❌ Supprimés (irréparables):\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
                                   }
+                                  if (report.skipped && report.skipped.length > 0) {
+                                    msg += '\n⏭️ Conservés (non réparables):\n' + report.skipped.map((r: string) => '  • ' + r).join('\n');
+                                  }
 
                                   // 4) Vérifier s'il reste des erreurs (autres que fichiers manquants)
                                   const remainingErrors = newVerification.errors.filter(e => !e.toLowerCase().includes('corrompu'));
@@ -3599,7 +3605,7 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                               }}
                               className="mt-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm px-3 py-1 rounded font-bold transition-colors"
                             >
-                              🔧 Réparer les fichiers corrompus (ffmpeg)
+                              🔧 Réparer les fichiers corrompus
                             </button>
                           )}
                         </div>

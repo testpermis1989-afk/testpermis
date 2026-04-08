@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
+import fs from 'fs';
 import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
@@ -14,7 +15,8 @@ function getJimp() {
 }
 
 // POST /api/series/repair - Réparer les fichiers corrompus d'une série existante
-// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
+// Images: réparées avec Jimp (100% JavaScript)
+// Audio/Vidéo: validation + report (pas de réparation possible sans FFmpeg natif)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -29,10 +31,11 @@ export async function POST(request: NextRequest) {
     const report = {
       repaired: [] as string[],
       removed: [] as string[],
+      skipped: [] as string[],
       errors: [] as string[],
     };
 
-    // Réparer les images (Jimp with Buffers - no native binaries needed!)
+    // ===== RÉPARER LES IMAGES (Jimp - 100% JavaScript, no native binaries!) =====
     const imagesFolder = `${storagePrefix}/images`;
     try {
       const images = await listFiles(imagesFolder);
@@ -48,10 +51,7 @@ export async function POST(request: NextRequest) {
           // Réparer avec Jimp (Buffer-based, no native binaries!)
           const Jimp = getJimp();
           if (!Jimp) {
-            try {
-              await supabase.storage.from('uploads').remove([imgStoragePath]);
-            } catch {}
-            report.removed.push(`images/${img}`);
+            report.removed.push(`images/${img} — Corrompue (Jimp non disponible)`);
             continue;
           }
           try {
@@ -63,24 +63,18 @@ export async function POST(request: NextRequest) {
               const newImgName = img.replace(/\.[^.]+$/, '.jpg');
               const newStoragePath = `${imagesFolder}/${newImgName}`;
               await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
-              report.repaired.push(`images/${img} → ${newImgName}`);
+              report.repaired.push(`images/${img} → ${newImgName} ✓`);
 
               // Remove old file if name changed
               if (newImgName !== img) {
-                try {
-                  await supabase.storage.from('uploads').remove([imgStoragePath]);
-                } catch {}
+                try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
               }
             } else {
-              try {
-                await supabase.storage.from('uploads').remove([imgStoragePath]);
-              } catch {}
+              try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
               report.removed.push(`images/${img}`);
             }
           } catch {
-            try {
-              await supabase.storage.from('uploads').remove([imgStoragePath]);
-            } catch {}
+            try { await supabase.storage.from('uploads').remove([imgStoragePath]); } catch {}
             report.removed.push(`images/${img}`);
           }
         } catch (err) {
@@ -89,7 +83,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // Réparer les images de réponses
+    // ===== RÉPARER LES IMAGES DE RÉPONSES =====
     const responsesFolder = `${storagePrefix}/responses`;
     try {
       const responses = await listFiles(responsesFolder);
@@ -104,10 +98,7 @@ export async function POST(request: NextRequest) {
 
           const Jimp = getJimp();
           if (!Jimp) {
-            try {
-              await supabase.storage.from('uploads').remove([respStoragePath]);
-            } catch {}
-            report.removed.push(`responses/${resp}`);
+            report.removed.push(`responses/${resp} — Corrompue (Jimp non disponible)`);
             continue;
           }
           try {
@@ -119,22 +110,16 @@ export async function POST(request: NextRequest) {
               const newRespName = resp.replace(/\.[^.]+$/, '.jpg');
               const newStoragePath = `${responsesFolder}/${newRespName}`;
               await uploadFile(newStoragePath, outputBuffer, 'image/jpeg');
-              report.repaired.push(`responses/${resp} → ${newRespName}`);
+              report.repaired.push(`responses/${resp} → ${newRespName} ✓`);
               if (newRespName !== resp) {
-                try {
-                  await supabase.storage.from('uploads').remove([respStoragePath]);
-                } catch {}
+                try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
               }
             } else {
-              try {
-                await supabase.storage.from('uploads').remove([respStoragePath]);
-              } catch {}
+              try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
               report.removed.push(`responses/${resp}`);
             }
           } catch {
-            try {
-              await supabase.storage.from('uploads').remove([respStoragePath]);
-            } catch {}
+            try { await supabase.storage.from('uploads').remove([respStoragePath]); } catch {}
             report.removed.push(`responses/${resp}`);
           }
         } catch (err) {
@@ -143,9 +128,8 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // Audio MP3 - réparer avec FFmpeg WASM
+    // ===== AUDIO MP3 - validation only =====
     const audioFolder = `${storagePrefix}/audio`;
-    const { repairMp3, repairMp4 } = await import('@/lib/ffmpeg-helper');
     try {
       const audios = await listFiles(audioFolder);
       for (const audio of audios) {
@@ -154,19 +138,14 @@ export async function POST(request: NextRequest) {
         const audioStoragePath = `${audioFolder}/${audio}`;
         try {
           const fileData = await downloadFile(audioStoragePath);
-          if (isValidMp3(fileData)) continue;
+          if (isValidMp3(fileData)) continue; // Déjà valide
 
-          // Try to repair with FFmpeg WASM
-          const result = await repairMp3(fileData);
-          if (result.repaired) {
-            try {
-              await uploadFile(audioStoragePath, result.data, 'audio/mpeg');
-              report.repaired.push(`audio/${audio} — Audio réparé`);
-            } catch (uploadErr) {
-              report.errors.push(`audio/${audio} — Réparé mais upload échoué`);
-            }
+          if (fileData.length > 1000) {
+            // Audio avec headers non standards mais données présentes
+            report.skipped.push(`audio/${audio} — Conservé (headers non standards)`);
           } else {
-            report.errors.push(`audio/${audio} — Corrompu irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+            try { await supabase.storage.from('uploads').remove([audioStoragePath]); } catch {}
+            report.removed.push(`audio/${audio} — Corrompu (trop petit: ${fileData.length} octets)`);
           }
         } catch (err) {
           console.error(`Error downloading audio ${audio}:`, err);
@@ -174,7 +153,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // Vidéo MP4 - réparer avec FFmpeg WASM
+    // ===== VIDÉO MP4 - validation only =====
     const videoFolder = `${storagePrefix}/video`;
     try {
       const videos = await listFiles(videoFolder);
@@ -184,19 +163,14 @@ export async function POST(request: NextRequest) {
         const videoStoragePath = `${videoFolder}/${video}`;
         try {
           const fileData = await downloadFile(videoStoragePath);
-          if (isValidMp4(fileData)) continue;
+          if (isValidMp4(fileData)) continue; // Déjà valide
 
-          // Try to repair with FFmpeg WASM
-          const result = await repairMp4(fileData);
-          if (result.repaired) {
-            try {
-              await uploadFile(videoStoragePath, result.data, 'video/mp4');
-              report.repaired.push(`video/${video} — Vidéo réparée`);
-            } catch (uploadErr) {
-              report.errors.push(`video/${video} — Réparée mais upload échoué`);
-            }
+          if (fileData.length > 10000) {
+            // Vidéo avec container non standard mais données présentes
+            report.skipped.push(`video/${video} — Conservée (container non standard)`);
           } else {
-            report.errors.push(`video/${video} — Corrompue irréparable${result.error ? ' (' + result.error + ')' : ''}`);
+            try { await supabase.storage.from('uploads').remove([videoStoragePath]); } catch {}
+            report.removed.push(`video/${video} — Corrompue (trop petite: ${fileData.length} octets)`);
           }
         } catch (err) {
           console.error(`Error downloading video ${video}:`, err);
@@ -204,12 +178,129 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
+    // ===== ALSO CHECK LOCAL FILES (for Electron app) =====
+    if (process.env.STORAGE_MODE === 'local') {
+      const localBase = process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data', 'uploads');
+      const localSeriePath = path.join(localBase, 'series', category, String(serie));
+
+      // Repair local images
+      const localImagesDir = path.join(localSeriePath, 'images');
+      if (fs.existsSync(localImagesDir)) {
+        for (const file of fs.readdirSync(localImagesDir)) {
+          const ext = path.extname(file).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
+
+          const filePath = path.join(localImagesDir, file);
+          try {
+            const fileData = fs.readFileSync(filePath);
+            if (isValidImage(fileData)) continue;
+
+            const Jimp = getJimp();
+            if (!Jimp) continue;
+            try {
+              const image = await Jimp.read(fileData);
+              image.scaleToFit(1024, 1024);
+              const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+              if (outputBuffer.length > 0) {
+                const newName = file.replace(/\.[^.]+$/, '.jpg');
+                fs.writeFileSync(path.join(localImagesDir, newName), outputBuffer);
+                if (newName !== file) {
+                  try { fs.unlinkSync(filePath); } catch {}
+                }
+                report.repaired.push(`[local] images/${file} → ${newName} ✓`);
+              } else {
+                try { fs.unlinkSync(filePath); } catch {}
+                report.removed.push(`[local] images/${file}`);
+              }
+            } catch {
+              try { fs.unlinkSync(filePath); } catch {}
+              report.removed.push(`[local] images/${file}`);
+            }
+          } catch {}
+        }
+      }
+
+      // Repair local response images
+      const localResponsesDir = path.join(localSeriePath, 'responses');
+      if (fs.existsSync(localResponsesDir)) {
+        for (const file of fs.readdirSync(localResponsesDir)) {
+          const ext = path.extname(file).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'].includes(ext)) continue;
+
+          const filePath = path.join(localResponsesDir, file);
+          try {
+            const fileData = fs.readFileSync(filePath);
+            if (isValidImage(fileData)) continue;
+
+            const Jimp = getJimp();
+            if (!Jimp) continue;
+            try {
+              const image = await Jimp.read(fileData);
+              image.scaleToFit(1024, 1024);
+              const outputBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+              if (outputBuffer.length > 0) {
+                const newName = file.replace(/\.[^.]+$/, '.jpg');
+                fs.writeFileSync(path.join(localResponsesDir, newName), outputBuffer);
+                if (newName !== file) {
+                  try { fs.unlinkSync(filePath); } catch {}
+                }
+                report.repaired.push(`[local] responses/${file} → ${newName} ✓`);
+              } else {
+                try { fs.unlinkSync(filePath); } catch {}
+                report.removed.push(`[local] responses/${file}`);
+              }
+            } catch {
+              try { fs.unlinkSync(filePath); } catch {}
+              report.removed.push(`[local] responses/${file}`);
+            }
+          } catch {}
+        }
+      }
+
+      // Validate local audio
+      const localAudioDir = path.join(localSeriePath, 'audio');
+      if (fs.existsSync(localAudioDir)) {
+        for (const file of fs.readdirSync(localAudioDir)) {
+          if (!file.toLowerCase().endsWith('.mp3')) continue;
+          const filePath = path.join(localAudioDir, file);
+          try {
+            const fileData = fs.readFileSync(filePath);
+            if (isValidMp3(fileData)) continue;
+            if (fileData.length < 1000) {
+              try { fs.unlinkSync(filePath); } catch {}
+              report.removed.push(`[local] audio/${file} — Corrompu`);
+            }
+          } catch {}
+        }
+      }
+
+      // Validate local video
+      const localVideoDir = path.join(localSeriePath, 'video');
+      if (fs.existsSync(localVideoDir)) {
+        for (const file of fs.readdirSync(localVideoDir)) {
+          if (!file.toLowerCase().endsWith('.mp4')) continue;
+          const filePath = path.join(localVideoDir, file);
+          try {
+            const fileData = fs.readFileSync(filePath);
+            if (isValidMp4(fileData)) continue;
+            if (fileData.length < 10000) {
+              try { fs.unlinkSync(filePath); } catch {}
+              report.removed.push(`[local] video/${file} — Corrompue`);
+            }
+          } catch {}
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       report,
       summary: {
         totalRepaired: report.repaired.length,
         totalRemoved: report.removed.length,
+        totalSkipped: report.skipped.length,
       }
     });
   } catch (error) {
@@ -221,25 +312,28 @@ export async function POST(request: NextRequest) {
 function isValidImage(data: Buffer): boolean {
   if (data.length < 8) return false;
   const h = data.slice(0, 16);
-  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true;
-  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true;
-  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true;
-  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true;
-  if (h[0] === 0x42 && h[1] === 0x4D) return true;
+  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true; // PNG
+  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true; // JPEG
+  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true; // GIF
+  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true; // WebP/RIFF
+  if (h[0] === 0x42 && h[1] === 0x4D) return true; // BMP
   return false;
 }
 
 function isValidMp3(data: Buffer): boolean {
   if (data.length < 10) return false;
+  // ID3 tag header
   if (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) return true;
+  // MPEG audio frame sync
   if (data[0] === 0xFF && (data[1] & 0xE0) === 0xE0) return true;
   return false;
 }
 
 function isValidMp4(data: Buffer): boolean {
   if (data.length < 12) return false;
-  if (data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70) return true;
-  if (data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76) return true;
-  if (data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74) return true;
-  return false;
+  const ftyp = data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70;
+  const moov = data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76;
+  const mdat = data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74;
+  const ftyp0 = data[0] === 0x66 && data[1] === 0x74 && data[2] === 0x79 && data[3] === 0x70;
+  return ftyp || moov || mdat || ftyp0;
 }

@@ -15,7 +15,8 @@ function getJimp() {
 }
 
 // POST /api/upload/rar/repair - Réparer les fichiers corrompus dans un ZIP
-// Uses Jimp with Buffers (100% JavaScript, no native binaries needed)
+// Images: réparées avec Jimp (100% JavaScript)
+// Audio/Vidéo: validation + report (pas de réparation possible sans FFmpeg natif)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
       const report = {
         repaired: [] as string[],
         removed: [] as string[],
+        skipped: [] as string[],
       };
 
       const newZip = new AdmZip();
@@ -80,9 +82,10 @@ export async function POST(request: NextRequest) {
         const dirName = entryName.substring(0, entryName.length - baseName.length);
         let fileData = entry.getData();
 
-        // ===== REPAIR IMAGES (Jimp with Buffers - no native binaries needed!) =====
+        // ===== REPAIR IMAGES (Jimp - 100% JavaScript, no native binaries needed!) =====
         if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif'].includes(ext)) {
           if (isValidImage(fileData)) {
+            // Image valide - garder tel quel
             newZip.addFile(entry.entryName, fileData);
             continue;
           }
@@ -90,7 +93,7 @@ export async function POST(request: NextRequest) {
           // Try to repair with Jimp
           const Jimp = getJimp();
           if (!Jimp) {
-            report.removed.push(`${baseName} — Image irréparable (Jimp non disponible)`);
+            report.removed.push(`${baseName} — Image corrompue (Jimp non disponible)`);
             continue;
           }
           try {
@@ -101,7 +104,7 @@ export async function POST(request: NextRequest) {
             if (outputBuffer.length > 0) {
               const newBaseName = baseName.replace(/\.[^.]+$/, '.jpg');
               newZip.addFile(stripParent + dirName + newBaseName, outputBuffer);
-              report.repaired.push(`${baseName} → Image réparée`);
+              report.repaired.push(`${baseName} → Image réparée ✓`);
             } else {
               report.removed.push(`${baseName} — Image irréparable`);
             }
@@ -111,38 +114,33 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // ===== AUDIO MP3 - repair with FFmpeg WASM =====
+        // ===== AUDIO MP3 - validation only =====
         if (ext === '.mp3') {
           if (isValidMp3(fileData)) {
+            // MP3 valide - garder tel quel
             newZip.addFile(entry.entryName, fileData);
+          } else if (fileData.length > 1000) {
+            // MP3 avec headers non standards mais données présentes - garder tel quel
+            // (certains encodeurs MP3 utilisent des headers non conventionnels)
+            newZip.addFile(entry.entryName, fileData);
+            report.skipped.push(`${baseName} — Audio MP3 conservé (headers non standards)`);
           } else {
-            // Try to repair with FFmpeg WASM
-            const { repairMp3 } = await import('@/lib/ffmpeg-helper');
-            const result = await repairMp3(fileData);
-            if (result.repaired) {
-              newZip.addFile(stripParent + dirName + baseName, result.data);
-              report.repaired.push(`${baseName} — Audio réparé`);
-            } else {
-              report.removed.push(`${baseName} — Audio corrompu irréparable${result.error ? ' (' + result.error + ')' : ''}`);
-            }
+            report.removed.push(`${baseName} — Audio corrompu (fichier trop petit: ${fileData.length} octets)`);
           }
           continue;
         }
 
-        // ===== VIDEO MP4 - repair with FFmpeg WASM =====
+        // ===== VIDEO MP4 - validation only =====
         if (ext === '.mp4') {
           if (isValidMp4(fileData)) {
+            // MP4 valide - garder tel quel
             newZip.addFile(entry.entryName, fileData);
+          } else if (fileData.length > 10000) {
+            // MP4 avec container non standard mais données présentes - garder tel quel
+            newZip.addFile(entry.entryName, fileData);
+            report.skipped.push(`${baseName} — Vidéo MP4 conservée (container non standard)`);
           } else {
-            // Try to repair with FFmpeg WASM
-            const { repairMp4 } = await import('@/lib/ffmpeg-helper');
-            const result = await repairMp4(fileData);
-            if (result.repaired) {
-              newZip.addFile(stripParent + dirName + baseName, result.data);
-              report.repaired.push(`${baseName} — Vidéo réparée`);
-            } else {
-              report.removed.push(`${baseName} — Vidéo corrompue irréparable${result.error ? ' (' + result.error + ')' : ''}`);
-            }
+            report.removed.push(`${baseName} — Vidéo corrompue (fichier trop petit: ${fileData.length} octets)`);
           }
           continue;
         }
@@ -154,7 +152,7 @@ export async function POST(request: NextRequest) {
       // Create repaired ZIP buffer
       const repairedBuffer = newZip.toBuffer();
 
-      // Save repaired ZIP back to Supabase temp storage (replace original)
+      // Save repaired ZIP back to temp storage (replace original)
       if (importId && !zipBufferBase64) {
         const job = await getUploadJob(importId);
         if (job) {
@@ -172,6 +170,7 @@ export async function POST(request: NextRequest) {
         summary: {
           totalRepaired: report.repaired.length,
           totalRemoved: report.removed.length,
+          totalSkipped: report.skipped.length,
         },
         zipBuffer: repairedBuffer.toString('base64'),
       });
@@ -187,25 +186,30 @@ export async function POST(request: NextRequest) {
 function isValidImage(data: Buffer): boolean {
   if (data.length < 8) return false;
   const h = data.slice(0, 16);
-  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true;
-  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true;
-  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true;
-  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true;
-  if (h[0] === 0x42 && h[1] === 0x4D) return true;
+  if (h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) return true; // PNG
+  if (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) return true; // JPEG
+  if (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) return true; // GIF
+  if (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46) return true; // WebP/RIFF
+  if (h[0] === 0x42 && h[1] === 0x4D) return true; // BMP
   return false;
 }
 
 function isValidMp3(data: Buffer): boolean {
   if (data.length < 10) return false;
+  // ID3 tag header
   if (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33) return true;
+  // MPEG audio frame sync (11 bits set)
   if (data[0] === 0xFF && (data[1] & 0xE0) === 0xE0) return true;
   return false;
 }
 
 function isValidMp4(data: Buffer): boolean {
   if (data.length < 12) return false;
-  if (data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70) return true;
-  if (data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76) return true;
-  if (data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74) return true;
-  return false;
+  // Check for common MP4 box types
+  const ftyp = data[4] === 0x66 && data[5] === 0x74 && data[6] === 0x79 && data[7] === 0x70;
+  const moov = data[4] === 0x6D && data[5] === 0x6F && data[6] === 0x6F && data[7] === 0x76;
+  const mdat = data[4] === 0x6D && data[5] === 0x64 && data[6] === 0x61 && data[7] === 0x74;
+  // Also check at offset 0 for ftyp in some MP4 variants
+  const ftyp0 = data[0] === 0x66 && data[1] === 0x74 && data[2] === 0x79 && data[3] === 0x70;
+  return ftyp || moov || mdat || ftyp0;
 }
