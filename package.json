@@ -116,36 +116,7 @@
       "electron/**",
       "!node_modules/**"
     ],
-    "extraResources": [
-      {
-        "from": "app-server",
-        "to": "app-server",
-        "filter": [
-          "**/*",
-          "node_modules/**",
-          "!skills/**",
-          "!upload/**",
-          "!examples/**",
-          "!.prisma/**",
-          "!**/*.zip",
-          "!**/README.md",
-          "!**/LICENSE",
-          "!**/CHANGELOG*",
-          "!**/.eslint*",
-          "!**/tsconfig*",
-          "!**/*.map",
-          "!**/src/**",
-          "!node_modules/typescript/**",
-          "!node_modules/@img/sharp-libvips-linux*/**",
-          "!node_modules/@img/sharp-linux*/**",
-          "!node_modules/source-map/**",
-          "!node_modules/source-map-support/**",
-          "!node_modules/@prisma/engines/**",
-          "!node_modules/.prisma/**",
-          "!node_modules/prisma/**"
-        ]
-      }
-    ],
+    "afterPack": "./scripts/afterPack.js",
     "win": {
       "target": [
         {
