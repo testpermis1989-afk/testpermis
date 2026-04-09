@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { decryptFileCached, isEncryptedFile, getOriginalFilename } from '@/lib/file-encryption';
+import { decryptFileCached, isEncryptedFile } from '@/lib/file-encryption';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -24,41 +24,48 @@ const MIME_TYPES: Record<string, string> = {
 // Extensions to try when a file is not found (ordered by likelihood)
 const FALLBACK_EXTENSIONS = ['.enc', '.webp', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.mp3', '.mp4', '.webm', '.svg'];
 
-function serveFile(filePath: string, contentType: string): NextResponse | null {
+function serveFile(filePath: string): NextResponse | null {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) return null;
 
-    let buffer: Buffer;
     const ext = path.extname(filePath).toLowerCase();
 
     // Handle encrypted files (.enc)
     if (ext === '.enc') {
       const result = decryptFileCached(filePath);
       if (!result) {
-        console.warn(`[Serve] Failed to decrypt: ${filePath}`);
+        // Decryption failed - file may be encrypted on a different machine
+        // Try to serve the underlying file without .enc extension
+        const originalPath = filePath.slice(0, -4); // remove .enc
+        if (fs.existsSync(originalPath)) {
+          console.warn(`[Serve] Decrypt failed for ${filePath}, trying original: ${originalPath}`);
+          return serveFile(originalPath);
+        }
+        console.warn(`[Serve] Failed to decrypt and no original found: ${filePath}`);
         return null;
       }
-      buffer = result.data;
-      // Use the original file's MIME type
+      const buffer = result.data;
       const originalExt = result.ext.toLowerCase();
-      const originalContentType = MIME_TYPES[originalExt] || 'application/octet-stream';
+      const contentType = MIME_TYPES[originalExt] || 'application/octet-stream';
       const isMedia = ['.mp3', '.mp4', '.webm', '.wav', '.ogg', '.aac'].includes(originalExt);
 
       return new NextResponse(buffer, {
         status: 200,
         headers: {
-          'Content-Type': originalContentType,
+          'Content-Type': contentType,
           'Content-Length': buffer.length.toString(),
           'Cache-Control': isMedia ? 'no-cache' : 'public, max-age=31536000, immutable',
-          ...(originalContentType.startsWith('video/') || originalContentType.startsWith('audio/') ? {
+          ...(contentType.startsWith('video/') || contentType.startsWith('audio/') ? {
             'Accept-Ranges': 'bytes',
           } : {}),
         },
       });
     }
 
-    buffer = fs.readFileSync(filePath);
+    // Serve unencrypted file
+    const buffer = fs.readFileSync(filePath);
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const isMedia = ['.mp3', '.mp4', '.webm', '.wav', '.ogg', '.aac'].includes(ext);
 
     return new NextResponse(buffer, {
@@ -79,7 +86,6 @@ function serveFile(filePath: string, contentType: string): NextResponse | null {
 
 // Extract a number from a filename pattern like 'q1', 'r1', 'question1', 'image_1'
 function extractNumberFromBasename(baseName: string): number | null {
-  // Match patterns: q1, r1, 1, question1, image_1, etc.
   const match = baseName.match(/\d+/);
   return match ? parseInt(match[1]) : null;
 }
@@ -102,9 +108,7 @@ export async function GET(
 
     // 1. Check exact file exists
     if (fs.existsSync(fullPath)) {
-      const ext = path.extname(fullPath).toLowerCase();
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      const response = serveFile(fullPath, contentType);
+      const response = serveFile(fullPath);
       if (response) return response;
     }
 
@@ -117,18 +121,14 @@ export async function GET(
       for (const altExt of FALLBACK_EXTENSIONS) {
         const altPath = path.join(dir, baseName + altExt);
         if (fs.existsSync(altPath)) {
-          const contentType = MIME_TYPES[altExt] || 'application/octet-stream';
-          const response = serveFile(altPath, contentType);
+          const response = serveFile(altPath);
           if (response) return response;
         }
       }
 
       // 3. FUZZY FALLBACK: Search directory for any file matching the question number
-      // This handles cases where files were saved with different naming conventions
-      // e.g., URL requests 'q1.png' but actual file is 'q1.png.enc' or 'question1.jpg.enc'
       const num = extractNumberFromBasename(baseName);
       if (num !== null) {
-        // Determine expected prefix: if baseName starts with 'r', look for response files
         const isResponse = /^r\d+$/i.test(baseName);
         const prefix = isResponse ? 'r' : 'q';
 
@@ -143,16 +143,13 @@ export async function GET(
             }
             const fNum = extractNumberFromBasename(path.basename(fBaseName, path.extname(fBaseName)));
 
-            // Match by number and prefix pattern
             if (fNum === num) {
               const fExt = path.extname(fBaseName).toLowerCase();
-              // Prioritize files that match the expected prefix (q or r)
               const startsWithPrefix = fLower.startsWith(prefix.toLowerCase());
               if (startsWithPrefix || (FALLBACK_EXTENSIONS as readonly string[]).includes(fExt) || f.endsWith('.enc')) {
                 const matchPath = path.join(dir, f);
                 if (fs.existsSync(matchPath)) {
-                  const contentType = MIME_TYPES[fExt] || 'application/octet-stream';
-                  const response = serveFile(matchPath, contentType);
+                  const response = serveFile(matchPath);
                   if (response) {
                     console.log(`[Serve] Fuzzy match: '${filePath}' -> '${f}' (same number ${num})`);
                     return response;
