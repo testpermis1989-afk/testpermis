@@ -3281,6 +3281,18 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
   // Réparer une série existante
   const [repairingSerie, setRepairingSerie] = useState<string | null>(null);
+
+  // Repair prepare state (after repair, before import)
+  const [repairPrepareResult, setRepairPrepareResult] = useState<{
+    report: { repaired: string[]; removed: string[]; skipped: string[] };
+    summary: { totalRepaired: number; totalRemoved: number; totalSkipped: number };
+    compression: { totalBefore: number; totalAfter: number; savedBytes: number; totalBeforeFormatted: string; totalAfterFormatted: string; savedFormatted: string; filesCompressed: number };
+    questionsCount: number;
+    categoryCode: string;
+    fileDetails: { name: string; type: string; status: string; sizeBefore: number; sizeAfter: number; questionNum?: number }[];
+    repairedZipBase64: string;
+  } | null>(null);
+  const [repairImporting, setRepairImporting] = useState(false);
   const handleRepairSerie = async (cat: string, ser: number) => {
     const key = `${cat}_${ser}`;
     setRepairingSerie(key);
@@ -3534,26 +3546,25 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                 if (!isDesktop && !pendingImportId) return;
                                 const btn = (event?.target as HTMLButtonElement);
                                 const origText = btn?.textContent || '';
-                                if (btn) btn.textContent = '⏳ Réparation + Import en cours...';
+                                if (btn) btn.textContent = '⏳ Réparation + Compression en cours...';
                                 try {
-                                  // 1) Réparer les fichiers corrompus
+                                  // Step 1: Repair + compress WITHOUT importing
                                   let res: Response;
                                   if (isDesktop) {
-                                    // Desktop: send ZIP + category + serie → server repairs AND imports directly
                                     const formData = new FormData();
                                     formData.append('file', mediaFile!);
                                     formData.append('category', category);
                                     formData.append('serie', serie.toString());
+                                    formData.append('step', 'prepare');
                                     res = await fetch('/api/upload/rar/repair', {
                                       method: 'POST',
                                       body: formData,
                                     });
                                   } else {
-                                    // Cloud: send importId
                                     res = await fetch('/api/upload/rar/repair', {
                                       method: 'POST',
                                       headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ importId: pendingImportId }),
+                                      body: JSON.stringify({ importId: pendingImportId, category, step: 'prepare' }),
                                     });
                                   }
                                   const data = await res.json();
@@ -3563,37 +3574,9 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                     return;
                                   }
 
-                                  // 2) Afficher le résultat
-                                  const { summary, report } = data;
-                                  let msg = '✅ Réparation terminée!\n';
-                                  msg += `📁 ${summary?.totalRepaired || 0} fichier(s) réparé(s)\n`;
-                                  if (summary?.totalRemoved > 0) {
-                                    msg += `🗑️ ${summary.totalRemoved} fichier(s) irréparable(s)\n`;
-                                  }
-                                  if (report?.repaired?.length > 0) {
-                                    msg += '\n✅ Réparés:\n' + report.repaired.map((r: string) => '  • ' + r).join('\n');
-                                  }
-                                  if (report?.removed?.length > 0) {
-                                    msg += '\n❌ Supprimés:\n' + report.removed.map((r: string) => '  • ' + r).join('\n');
-                                  }
-
-                                  // 3) In desktop mode: server already imported!
-                                  if (isDesktop && data.mode === 'desktop') {
-                                    msg += `\n✅ ${data.questionsImported || 0} question(s) importée(s)`;
-                                    if (data.compression?.imagesCompressed > 0) {
-                                      msg += `\n📦 ${data.compression.imagesCompressed} image(s) compressée(s) (${data.compression.savedFormatted})`;
-                                    }
-                                    alert(msg);
-                                    setShowVerificationModal(false);
-                                    setCompressBeforeImport(null);
-                                    loadSeriesData();
-                                  } else if (!isDesktop) {
-                                    // Cloud mode: update verification
-                                    if (summary?.totalRepaired === 0 && summary?.totalRemoved === 0) {
-                                      msg += '\n✨ Tous les fichiers sont valides!';
-                                    }
-                                    alert(msg);
-                                  }
+                                  // Step 2: Show detailed repair result modal
+                                  setRepairPrepareResult(data);
+                                  setShowVerificationModal(false);
                                 } catch {
                                   alert('❌ Erreur de connexion');
                                 } finally {
@@ -3788,6 +3771,224 @@ const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                         className="px-5 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-bold text-sm"
                       >
                         ❌ Fermer
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Repair Prepare Result Modal - Detailed file list with validation for import */}
+              {repairPrepareResult && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                  <div className="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                    {/* Header */}
+                    <div className="bg-yellow-600 px-4 py-3 flex justify-between items-center">
+                      <h3 className="text-white font-bold text-lg">🔧 Réparation & Compression terminées</h3>
+                      <button onClick={() => setRepairPrepareResult(null)} className="text-white hover:text-gray-200 text-2xl font-bold">&times;</button>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-4 overflow-y-auto flex-1 space-y-4">
+                      {/* Summary cards */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-white">{repairPrepareResult.questionsCount}</div>
+                          <div className="text-gray-400 text-xs">Questions</div>
+                        </div>
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-green-400">{repairPrepareResult.summary.totalRepaired}</div>
+                          <div className="text-gray-400 text-xs">Réparés</div>
+                        </div>
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-red-400">{repairPrepareResult.summary.totalRemoved}</div>
+                          <div className="text-gray-400 text-xs">Supprimés</div>
+                        </div>
+                        <div className="bg-gray-700 rounded-lg p-3 text-center">
+                          <div className="text-2xl font-bold text-blue-400">{repairPrepareResult.compression.filesCompressed}</div>
+                          <div className="text-gray-400 text-xs">Compressés</div>
+                        </div>
+                      </div>
+
+                      {/* Compression stats */}
+                      <div className="bg-gray-700/50 rounded-lg p-3">
+                        <h4 className="text-blue-400 font-bold text-sm mb-2">📦 Compression</h4>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="bg-gray-700 rounded p-2">
+                            <p className="text-gray-400 text-xs">Avant</p>
+                            <p className="text-red-400 font-bold text-sm">{repairPrepareResult.compression.totalBeforeFormatted}</p>
+                          </div>
+                          <div className="bg-green-800/50 rounded p-2 border border-green-500/50">
+                            <p className="text-green-400 text-xs">Économisé</p>
+                            <p className="text-green-400 font-bold text-sm">-{repairPrepareResult.compression.savedFormatted}</p>
+                          </div>
+                          <div className="bg-gray-700 rounded p-2">
+                            <p className="text-gray-400 text-xs">Après</p>
+                            <p className="text-green-400 font-bold text-sm">{repairPrepareResult.compression.totalAfterFormatted}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Detailed file list table */}
+                      <div>
+                        <h4 className="text-gray-300 font-bold text-sm mb-2">📋 Détail des fichiers ({repairPrepareResult.fileDetails.length})</h4>
+                        <div className="overflow-x-auto max-h-64 overflow-y-auto border border-gray-600 rounded-lg">
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-700 sticky top-0">
+                              <tr>
+                                <th className="px-2 py-1.5 text-left text-gray-300 font-bold">#</th>
+                                <th className="px-2 py-1.5 text-left text-gray-300 font-bold">Fichier</th>
+                                <th className="px-2 py-1.5 text-center text-gray-300 font-bold">Type</th>
+                                <th className="px-2 py-1.5 text-center text-gray-300 font-bold">Statut</th>
+                                <th className="px-2 py-1.5 text-right text-gray-300 font-bold">Avant</th>
+                                <th className="px-2 py-1.5 text-right text-gray-300 font-bold">Après</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {repairPrepareResult.fileDetails.map((f, i) => (
+                                <tr key={i} className={`border-b border-gray-700/50 ${f.status === 'removed' ? 'bg-red-900/20' : f.status === 'repaired' ? 'bg-yellow-900/20' : f.status === 'compressed' ? 'bg-blue-900/20' : ''}`}>
+                                  <td className="px-2 py-1 text-gray-500">{i + 1}</td>
+                                  <td className="px-2 py-1 text-white font-mono truncate max-w-[180px]">{f.name}</td>
+                                  <td className="px-2 py-1 text-center">
+                                    <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                                      f.type === 'image' ? 'bg-blue-900 text-blue-300' :
+                                      f.type === 'audio' ? 'bg-purple-900 text-purple-300' :
+                                      f.type === 'video' ? 'bg-cyan-900 text-cyan-300' :
+                                      f.type === 'response' ? 'bg-orange-900 text-orange-300' :
+                                      'bg-gray-700 text-gray-300'
+                                    }`}>
+                                      {f.type === 'image' ? '🖼️' : f.type === 'audio' ? '🔊' : f.type === 'video' ? '🎬' : f.type === 'response' ? '📄' : '📝'}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-1 text-center">
+                                    {f.status === 'ok' && <span className="text-green-400">✅ OK</span>}
+                                    {f.status === 'repaired' && <span className="text-yellow-400">🔧 Réparé</span>}
+                                    {f.status === 'compressed' && <span className="text-blue-400">📦 Compressé</span>}
+                                    {f.status === 'removed' && <span className="text-red-400">❌ Supprimé</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right text-gray-400">{formatSize(f.sizeBefore)}</td>
+                                  <td className="px-2 py-1 text-right">
+                                    {f.status === 'removed' ? (
+                                      <span className="text-red-500">—</span>
+                                    ) : f.sizeAfter < f.sizeBefore ? (
+                                      <span className="text-green-400">{formatSize(f.sizeAfter)} <span className="text-yellow-400">(-{Math.round((1 - f.sizeAfter / f.sizeBefore) * 100)}%)</span></span>
+                                    ) : (
+                                      <span className="text-gray-400">{formatSize(f.sizeAfter)}</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="mt-1.5 flex gap-3 text-xs text-gray-500">
+                          <span><span className="text-green-400">✅</span> OK</span>
+                          <span><span className="text-yellow-400">🔧</span> Réparé</span>
+                          <span><span className="text-blue-400">📦</span> Compressé</span>
+                          <span><span className="text-red-400">❌</span> Supprimé</span>
+                        </div>
+                      </div>
+
+                      {/* Repaired/Removed lists */}
+                      {repairPrepareResult.report.repaired.length > 0 && (
+                        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
+                          <h4 className="text-yellow-400 font-bold text-sm mb-1">✅ Fichiers réparés ({repairPrepareResult.report.repaired.length})</h4>
+                          <ul className="text-yellow-300/80 text-xs space-y-0.5 max-h-24 overflow-y-auto">
+                            {repairPrepareResult.report.repaired.map((r, i) => <li key={i}>• {r}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {repairPrepareResult.report.removed.length > 0 && (
+                        <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3">
+                          <h4 className="text-red-400 font-bold text-sm mb-1">❌ Fichiers irréparables ({repairPrepareResult.report.removed.length})</h4>
+                          <ul className="text-red-300/80 text-xs space-y-0.5 max-h-24 overflow-y-auto">
+                            {repairPrepareResult.report.removed.map((r, i) => <li key={i}>• {r}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer with import button */}
+                    <div className="px-4 py-3 bg-gray-700 flex justify-between items-center gap-3">
+                      <button
+                        onClick={() => {
+                          setRepairPrepareResult(null);
+                          setMediaResult(null);
+                          setMediaFile(null);
+                          setCompressBeforeImport(null);
+                        }}
+                        className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg font-bold text-sm transition-colors"
+                      >
+                        ❌ Annuler
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setRepairImporting(true);
+                          try {
+                            const isDesktop = window.electronAPI?.isDesktop?.() || process.env.NEXT_PUBLIC_STORAGE_MODE === 'local';
+                            let res: Response;
+                            if (isDesktop) {
+                              // Send repaired ZIP as file for import
+                              const repairedBlob = new Blob(
+                                [Uint8Array.from(atob(repairPrepareResult!.repairedZipBase64), c => c.charCodeAt(0))],
+                                { type: 'application/zip' }
+                              );
+                              const formData = new FormData();
+                              formData.append('file', repairedBlob, `repaired_${category}_s${serie}.zip`);
+                              formData.append('category', category);
+                              formData.append('serie', serie.toString());
+                              formData.append('step', 'import');
+                              res = await fetch('/api/upload/rar/repair', {
+                                method: 'POST',
+                                body: formData,
+                              });
+                            } else {
+                              res = await fetch('/api/upload/rar/repair', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  zipBuffer: repairPrepareResult!.repairedZipBase64,
+                                  category,
+                                  serie,
+                                  step: 'import',
+                                }),
+                              });
+                            }
+                            const data = await res.json();
+                            if (!res.ok) {
+                              alert('❌ ' + (data.error || 'Erreur lors de l\'importation'));
+                              return;
+                            }
+                            // Show success
+                            setRepairPrepareResult(null);
+                            setMediaResult(null);
+                            setMediaFile(null);
+                            setCompressBeforeImport(null);
+                            setImportConfirmation({
+                              category,
+                              serie,
+                              message: `✅ Import réussi après réparation!`,
+                              extracted: data.extracted || { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false },
+                              compression: { imagesCompressed: repairPrepareResult!.compression.filesCompressed, savedBytes: repairPrepareResult!.compression.savedBytes, savedFormatted: repairPrepareResult!.compression.savedFormatted },
+                              questionsImported: data.questionsImported || 0,
+                            });
+                            loadSeriesData();
+                          } catch {
+                            alert('❌ Erreur de connexion');
+                          } finally {
+                            setRepairImporting(false);
+                          }
+                        }}
+                        disabled={repairImporting || repairPrepareResult.summary.totalRemoved === repairPrepareResult.fileDetails.length}
+                        className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                      >
+                        {repairImporting ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Import en cours...
+                          </>
+                        ) : (
+                          <>✅ Valider et Importer ({repairPrepareResult.questionsCount} questions)</>
+                        )}
                       </button>
                     </div>
                   </div>

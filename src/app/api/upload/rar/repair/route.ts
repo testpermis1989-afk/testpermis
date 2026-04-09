@@ -42,41 +42,80 @@ function getLocalDataDir(): string {
   return process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
 }
 
-// POST /api/upload/rar/repair - Réparer les fichiers corrompus et importer
-// Desktop mode (FormData): reçoit ZIP + category + serie → répare → importe directement sur disque
-// Cloud mode (JSON): reçoit importId → répare → retourne ZIP base64
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+// POST /api/upload/rar/repair
+// step=prepare: Repair + compress files, return file details + repaired ZIP (NO import)
+// step=import: Import a previously repaired ZIP (receives base64 zipBuffer + category + serie)
+// step=full: (legacy) Repair + compress + import in one shot
 export async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get('content-type') || '';
 
     if (contentType.includes('multipart/form-data') && isLocalMode()) {
       // ====================================================================
-      // DESKTOP MODE: Repair + Import directly to local filesystem
+      // DESKTOP MODE
       // ====================================================================
       const formData = await request.formData();
       const file = formData.get('file') as File;
       const categoryCode = formData.get('category') as string;
       const serieNumber = formData.get('serie') as string;
+      const step = formData.get('step') as string || 'prepare'; // prepare | import
 
-      if (!file || !categoryCode || !serieNumber) {
-        return NextResponse.json({ error: 'Champs manquants (file, category, serie)' }, { status: 400 });
+      if (!file) {
+        return NextResponse.json({ error: 'Fichier manquant' }, { status: 400 });
       }
 
       const zipBuffer = Buffer.from(await file.arrayBuffer());
-      const result = await repairAndImportLocal(zipBuffer, categoryCode, parseInt(serieNumber));
 
-      return NextResponse.json({
-        success: true,
-        mode: 'desktop',
-        ...result,
-      });
+      if (step === 'prepare') {
+        // STEP 1: Repair + compress, return details, do NOT import
+        const result = await repairAndPrepare(zipBuffer, categoryCode);
+        return NextResponse.json({
+          success: true,
+          mode: 'desktop',
+          step: 'prepare',
+          ...result,
+        });
+      } else if (step === 'import') {
+        // STEP 2: Import the repaired ZIP
+        if (!categoryCode || !serieNumber) {
+          return NextResponse.json({ error: 'Catégorie et série requis pour l\'import' }, { status: 400 });
+        }
+        const result = await importRepairedZip(zipBuffer, categoryCode, parseInt(serieNumber));
+        return NextResponse.json({
+          success: true,
+          mode: 'desktop',
+          step: 'import',
+          ...result,
+        });
+      } else {
+        // Legacy: full repair + import in one shot
+        if (!categoryCode || !serieNumber) {
+          return NextResponse.json({ error: 'Champs manquants (category, serie)' }, { status: 400 });
+        }
+        const result = await repairAndImportLocal(zipBuffer, categoryCode, parseInt(serieNumber));
+        return NextResponse.json({
+          success: true,
+          mode: 'desktop',
+          step: 'full',
+          ...result,
+        });
+      }
     } else {
       // ====================================================================
-      // CLOUD MODE: Repair and return ZIP as base64
+      // CLOUD MODE
       // ====================================================================
       const body = await request.json();
       const importId = body.importId;
       const zipBufferBase64 = body.zipBuffer;
+      const categoryCode = body.category;
+      const serieNumber = body.serie;
+      const step = body.step || 'prepare';
 
       let zipBuffer: Buffer;
       if (zipBufferBase64) {
@@ -95,28 +134,45 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Missing importId or zipBuffer or file' }, { status: 400 });
       }
 
-      const { report, repairedBuffer } = await repairZipBuffer(zipBuffer);
-
-      // Save repaired ZIP back to temp storage
-      if (importId) {
-        try {
-          const { getUploadJob } = await import('@/lib/upload-store');
-          const job = await getUploadJob(importId);
-          if (job) await saveUploadJob(importId, repairedBuffer, job);
-        } catch {}
+      if (step === 'prepare') {
+        const result = await repairAndPrepare(zipBuffer, categoryCode);
+        return NextResponse.json({
+          success: true,
+          mode: 'cloud',
+          step: 'prepare',
+          ...result,
+        });
+      } else if (step === 'import' && categoryCode && serieNumber) {
+        const result = await importRepairedZip(zipBuffer, categoryCode, parseInt(serieNumber));
+        return NextResponse.json({
+          success: true,
+          mode: 'cloud',
+          step: 'import',
+          ...result,
+        });
+      } else {
+        // Legacy cloud mode: repair only
+        const { report, repairedBuffer } = await repairZipBuffer(zipBuffer);
+        if (importId) {
+          try {
+            const { getUploadJob } = await import('@/lib/upload-store');
+            const job = await getUploadJob(importId);
+            if (job) await saveUploadJob(importId, repairedBuffer, job);
+          } catch {}
+        }
+        return NextResponse.json({
+          success: true,
+          mode: 'cloud',
+          step: 'legacy',
+          report,
+          summary: {
+            totalRepaired: report.repaired.length,
+            totalRemoved: report.removed.length,
+            totalSkipped: report.skipped.length,
+          },
+          zipBuffer: repairedBuffer.toString('base64'),
+        });
       }
-
-      return NextResponse.json({
-        success: true,
-        mode: 'cloud',
-        report,
-        summary: {
-          totalRepaired: report.repaired.length,
-          totalRemoved: report.removed.length,
-          totalSkipped: report.skipped.length,
-        },
-        zipBuffer: repairedBuffer.toString('base64'),
-      });
     }
   } catch (error) {
     console.error('Repair error:', error);
@@ -125,24 +181,323 @@ export async function POST(request: NextRequest) {
 }
 
 // =====================================================================
-// DESKTOP MODE: Repair ZIP + Import directly to local filesystem
+// STEP 1: Repair + Compress WITHOUT importing
+// Returns detailed file list with sizes and statuses
 // =====================================================================
-async function repairAndImportLocal(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
-  const dataDir = getLocalDataDir();
-  const seriesDir = path.join(dataDir, 'uploads', `series/${categoryCode}/${serieNumber}`);
-
+async function repairAndPrepare(zipBuffer: Buffer, categoryCode?: string) {
   const report = {
     repaired: [] as string[],
     removed: [] as string[],
     skipped: [] as string[],
   };
 
-  const extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, compressed: 0, savedBytes: 0 };
-  let fileErrors: string[] = [];
-  let diskStats = { imagesFound: 0, audioFound: 0, videoFound: 0, responsesFound: 0 };
+  // Detailed file list for the UI
+  const fileDetails: {
+    name: string;
+    type: 'image' | 'audio' | 'video' | 'response' | 'text';
+    status: 'ok' | 'repaired' | 'removed' | 'skipped' | 'compressed';
+    sizeBefore: number;
+    sizeAfter: number;
+    questionNum?: number;
+  }[] = [];
+
+  let totalBefore = 0;
+  let totalAfter = 0;
+  let compressedCount = 0;
+
+  const zip = new AdmZip(zipBuffer);
+  const entries = zip.getEntries();
+
+  // Auto-detect parent folder
+  const topLevelDirs = new Set<string>();
+  for (const entry of entries) {
+    const parts = entry.entryName.split('/').filter(Boolean);
+    if (parts.length >= 2) topLevelDirs.add(parts[0].toLowerCase());
+  }
+  let stripParent = '';
+  if (topLevelDirs.size === 1) stripParent = [...topLevelDirs][0] + '/';
+
+  const newZip = new AdmZip();
+
+  // Track TXT content for questions count
+  let txtContent = '';
+  let questionsCount = 0;
+
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      newZip.addFile(entry.entryName, Buffer.alloc(0));
+      continue;
+    }
+
+    let entryNameFull = entry.entryName;
+    let entryName = entryNameFull.toLowerCase();
+    if (stripParent && entryName.startsWith(stripParent)) {
+      entryNameFull = entryNameFull.substring(stripParent.length);
+      entryName = entryNameFull.toLowerCase();
+    }
+    const baseNameOriginal = path.basename(entryNameFull);
+
+    let fileData: Buffer;
+    try { fileData = entry.getData(); } catch { continue; }
+
+    const ext = path.extname(entryName).toLowerCase();
+
+    // TXT file
+    if (entryName.endsWith('.txt')) {
+      try {
+        txtContent = fileData.toString('utf-8');
+        const lines = txtContent.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+        questionsCount = lines.filter(l => {
+          const parts = l.split(/[\t\s,;]+/).filter(p => p);
+          return parts.length >= 2 && !isNaN(parseInt(parts[0]));
+        }).length;
+      } catch {}
+      newZip.addFile(entry.entryName, fileData);
+      fileDetails.push({
+        name: baseNameOriginal,
+        type: 'text',
+        status: 'ok',
+        sizeBefore: fileData.length,
+        sizeAfter: fileData.length,
+      });
+      totalBefore += fileData.length;
+      totalAfter += fileData.length;
+      continue;
+    }
+
+    // Question images
+    const imgExts = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'];
+    if (imgExts.includes(ext) && isQuestionImageEntry(entryName, entryNameFull)) {
+      const qNum = extractQuestionNumber(baseNameOriginal);
+      const sizeBefore = fileData.length;
+      totalBefore += sizeBefore;
+      const isCorrupted = !isValidImage(fileData);
+
+      if (isCorrupted) {
+        // Try to repair with Jimp
+        const outputBuffer = await jimpCompress(fileData);
+        if (outputBuffer && outputBuffer.length > 0) {
+          const jpgName = qNum ? `q${qNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
+          newZip.addFile(stripParent + (qNum ? 'images/' : '') + jpgName, outputBuffer);
+          report.repaired.push(`${baseNameOriginal} → Image réparée ✓`);
+          fileDetails.push({
+            name: jpgName,
+            type: 'image',
+            status: 'repaired',
+            sizeBefore,
+            sizeAfter: outputBuffer.length,
+            questionNum: qNum ?? undefined,
+          });
+          totalAfter += outputBuffer.length;
+        } else {
+          report.removed.push(`${baseNameOriginal} — Image irréparable`);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'image',
+            status: 'removed',
+            sizeBefore,
+            sizeAfter: 0,
+            questionNum: qNum ?? undefined,
+          });
+        }
+      } else {
+        // Compress valid image
+        const outputBuffer = await jimpCompress(fileData);
+        if (outputBuffer && outputBuffer.length > 0 && outputBuffer.length < fileData.length) {
+          const jpgName = qNum ? `q${qNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
+          newZip.addFile(stripParent + (qNum ? 'images/' : '') + jpgName, outputBuffer);
+          compressedCount++;
+          fileDetails.push({
+            name: jpgName,
+            type: 'image',
+            status: 'compressed',
+            sizeBefore,
+            sizeAfter: outputBuffer.length,
+            questionNum: qNum ?? undefined,
+          });
+          totalAfter += outputBuffer.length;
+        } else {
+          newZip.addFile(entry.entryName, fileData);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'image',
+            status: 'ok',
+            sizeBefore,
+            sizeAfter: sizeBefore,
+            questionNum: qNum ?? undefined,
+          });
+          totalAfter += sizeBefore;
+        }
+      }
+      continue;
+    }
+
+    // Response images
+    if (imgExts.includes(ext) && isResponseImageEntry(entryName, entryNameFull)) {
+      const rNum = extractResponseNumber(baseNameOriginal);
+      const sizeBefore = fileData.length;
+      totalBefore += sizeBefore;
+      const isCorrupted = !isValidImage(fileData);
+
+      if (isCorrupted) {
+        const outputBuffer = await jimpCompress(fileData);
+        if (outputBuffer && outputBuffer.length > 0) {
+          const jpgName = rNum ? `r${rNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
+          newZip.addFile(stripParent + (rNum ? 'responses/' : '') + jpgName, outputBuffer);
+          report.repaired.push(`${baseNameOriginal} → Image réponse réparée ✓`);
+          fileDetails.push({
+            name: jpgName,
+            type: 'response',
+            status: 'repaired',
+            sizeBefore,
+            sizeAfter: outputBuffer.length,
+            questionNum: rNum ?? undefined,
+          });
+          totalAfter += outputBuffer.length;
+        } else {
+          report.removed.push(`${baseNameOriginal} — Image réponse irréparable`);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'response',
+            status: 'removed',
+            sizeBefore,
+            sizeAfter: 0,
+            questionNum: rNum ?? undefined,
+          });
+        }
+      } else {
+        const outputBuffer = await jimpCompress(fileData);
+        if (outputBuffer && outputBuffer.length > 0 && outputBuffer.length < fileData.length) {
+          const jpgName = rNum ? `r${rNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
+          newZip.addFile(stripParent + (rNum ? 'responses/' : '') + jpgName, outputBuffer);
+          compressedCount++;
+          fileDetails.push({
+            name: jpgName,
+            type: 'response',
+            status: 'compressed',
+            sizeBefore,
+            sizeAfter: outputBuffer.length,
+            questionNum: rNum ?? undefined,
+          });
+          totalAfter += outputBuffer.length;
+        } else {
+          newZip.addFile(entry.entryName, fileData);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'response',
+            status: 'ok',
+            sizeBefore,
+            sizeAfter: sizeBefore,
+            questionNum: rNum ?? undefined,
+          });
+          totalAfter += sizeBefore;
+        }
+      }
+      continue;
+    }
+
+    // Audio
+    if (ext === '.mp3' && isAudioEntry(entryName, entryNameFull)) {
+      const qNum = extractQuestionNumber(baseNameOriginal);
+      const sizeBefore = fileData.length;
+      totalBefore += sizeBefore;
+
+      if (isValidMp3(fileData) || fileData.length > 1000) {
+        newZip.addFile(entry.entryName, fileData);
+        fileDetails.push({
+          name: baseNameOriginal,
+          type: 'audio',
+          status: 'ok',
+          sizeBefore,
+          sizeAfter: sizeBefore,
+          questionNum: qNum ?? undefined,
+        });
+        totalAfter += sizeBefore;
+      } else {
+        report.removed.push(`${baseNameOriginal} — Audio corrompu`);
+        fileDetails.push({
+          name: baseNameOriginal,
+          type: 'audio',
+          status: 'removed',
+          sizeBefore,
+          sizeAfter: 0,
+          questionNum: qNum ?? undefined,
+        });
+      }
+      continue;
+    }
+
+    // Video
+    if (ext === '.mp4' && isVideoEntry(entryName, entryNameFull)) {
+      const qNum = extractQuestionNumber(baseNameOriginal);
+      const sizeBefore = fileData.length;
+      totalBefore += sizeBefore;
+
+      if (isValidMp4(fileData) || fileData.length > 10000) {
+        newZip.addFile(entry.entryName, fileData);
+        fileDetails.push({
+          name: baseNameOriginal,
+          type: 'video',
+          status: 'ok',
+          sizeBefore,
+          sizeAfter: sizeBefore,
+          questionNum: qNum ?? undefined,
+        });
+        totalAfter += sizeBefore;
+      } else {
+        report.removed.push(`${baseNameOriginal} — Vidéo corrompue`);
+        fileDetails.push({
+          name: baseNameOriginal,
+          type: 'video',
+          status: 'removed',
+          sizeBefore,
+          sizeAfter: 0,
+          questionNum: qNum ?? undefined,
+        });
+      }
+      continue;
+    }
+
+    // Other files: pass through
+    newZip.addFile(entry.entryName, fileData);
+  }
+
+  const repairedBuffer = newZip.toBuffer();
+  const savedBytes = totalBefore - totalAfter;
+
+  return {
+    report,
+    questionsCount,
+    categoryCode: categoryCode || 'unknown',
+    compression: {
+      totalBefore,
+      totalAfter,
+      savedBytes,
+      totalBeforeFormatted: formatSize(totalBefore),
+      totalAfterFormatted: formatSize(totalAfter),
+      savedFormatted: formatSize(savedBytes),
+      filesCompressed: compressedCount,
+    },
+    summary: {
+      totalRepaired: report.repaired.length,
+      totalRemoved: report.removed.length,
+      totalSkipped: report.skipped.length,
+    },
+    fileDetails,
+    repairedZipBase64: repairedBuffer.toString('base64'),
+  };
+}
+
+// =====================================================================
+// STEP 2: Import a repaired ZIP (from step=prepare result)
+// =====================================================================
+async function importRepairedZip(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
+  const dataDir = getLocalDataDir();
+  const seriesDir = path.join(dataDir, 'uploads', `series/${categoryCode}/${serieNumber}`);
+
+  let extractedFiles = { images: 0, audio: 0, video: 0, responses: 0 };
 
   try {
-    // Clean existing directory (overwrite mode)
     if (fs.existsSync(seriesDir)) {
       try { fs.rmSync(seriesDir, { recursive: true, force: true }); } catch {}
     }
@@ -151,7 +506,6 @@ async function repairAndImportLocal(zipBuffer: Buffer, categoryCode: string, ser
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
-    // Auto-detect parent folder
     const topLevelDirs = new Set<string>();
     for (const entry of entries) {
       const parts = entry.entryName.split('/').filter(Boolean);
@@ -176,148 +530,63 @@ async function repairAndImportLocal(zipBuffer: Buffer, categoryCode: string, ser
       let fileData: Buffer;
       try { fileData = entry.getData(); } catch { continue; }
 
-      // TXT file
-      if (entryName.endsWith('.txt') && (
-        entryName.includes('reponse') || entryName.includes('response') ||
-        entryName.includes('answer') || entryName.includes('question') ||
-        entryName === 'data.txt' || entryName.match(/^[^\/]+\.txt$/) ||
-        baseNameOriginal.toLowerCase().startsWith('repons') ||
-        baseNameOriginal.toLowerCase().startsWith('answer') ||
-        baseNameOriginal.toLowerCase() === 'data.txt'
-      )) {
+      // TXT
+      if (entryName.endsWith('.txt')) {
         txtContent = fileData.toString('utf-8');
         continue;
       }
 
-      try {
-        // Images
-        const imgExts = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'];
-        const ext = path.extname(entryName).toLowerCase();
+      const ext = path.extname(entryName).toLowerCase();
+      const imgExts = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif', '.webp'];
 
+      try {
         if (imgExts.includes(ext) && isQuestionImageEntry(entryName, entryNameFull)) {
           const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'images');
           fs.mkdirSync(dirPath, { recursive: true });
-
-          const isCorrupted = !isValidImage(fileData);
           const targetName = qNum ? `q${qNum}${ext}` : baseNameOriginal;
-
-          if (isCorrupted) {
-            // Try to repair with Jimp
-            const outputBuffer = await jimpCompress(fileData);
-            if (outputBuffer && outputBuffer.length > 0) {
-              const jpgName = qNum ? `q${qNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
-              fs.writeFileSync(path.join(dirPath, jpgName), outputBuffer);
-              report.repaired.push(`${baseNameOriginal} → Image réparée ✓`);
-              extractedFiles.compressed++;
-            } else {
-              report.removed.push(`${baseNameOriginal} — Image irréparable`);
-              continue;
-            }
-          } else {
-            // Compress valid image
-            const outputBuffer = await jimpCompress(fileData);
-            if (outputBuffer && outputBuffer.length > 0 && outputBuffer.length < fileData.length) {
-              const jpgName = qNum ? `q${qNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
-              fs.writeFileSync(path.join(dirPath, jpgName), outputBuffer);
-              extractedFiles.compressed++;
-              extractedFiles.savedBytes += (fileData.length - outputBuffer.length);
-            } else {
-              fs.writeFileSync(path.join(dirPath, targetName), fileData);
-            }
-          }
+          fs.writeFileSync(path.join(dirPath, targetName), fileData);
           extractedFiles.images++;
           continue;
         }
 
-        // Response images
         if (imgExts.includes(ext) && isResponseImageEntry(entryName, entryNameFull)) {
           const rNum = extractResponseNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'responses');
           fs.mkdirSync(dirPath, { recursive: true });
-
-          const isCorrupted = !isValidImage(fileData);
           const targetName = rNum ? `r${rNum}${ext}` : baseNameOriginal;
-
-          if (isCorrupted) {
-            const outputBuffer = await jimpCompress(fileData);
-            if (outputBuffer && outputBuffer.length > 0) {
-              const jpgName = rNum ? `r${rNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
-              fs.writeFileSync(path.join(dirPath, jpgName), outputBuffer);
-              report.repaired.push(`${baseNameOriginal} → Image réponse réparée ✓`);
-              extractedFiles.compressed++;
-            } else {
-              report.removed.push(`${baseNameOriginal} — Image réponse irréparable`);
-              continue;
-            }
-          } else {
-            const outputBuffer = await jimpCompress(fileData);
-            if (outputBuffer && outputBuffer.length > 0 && outputBuffer.length < fileData.length) {
-              const jpgName = rNum ? `r${rNum}.jpg` : baseNameOriginal.replace(/\.[^.]+$/, '.jpg');
-              fs.writeFileSync(path.join(dirPath, jpgName), outputBuffer);
-              extractedFiles.compressed++;
-              extractedFiles.savedBytes += (fileData.length - outputBuffer.length);
-            } else {
-              fs.writeFileSync(path.join(dirPath, targetName), fileData);
-            }
-          }
+          fs.writeFileSync(path.join(dirPath, targetName), fileData);
           extractedFiles.responses++;
           continue;
         }
 
-        // Audio
         if (ext === '.mp3' && isAudioEntry(entryName, entryNameFull)) {
           const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'audio');
           fs.mkdirSync(dirPath, { recursive: true });
           const saveName = qNum ? `q${qNum}.mp3` : baseNameOriginal;
-
-          if (isValidMp3(fileData) || fileData.length > 1000) {
-            fs.writeFileSync(path.join(dirPath, saveName), fileData);
-            extractedFiles.audio++;
-          } else {
-            report.removed.push(`${baseNameOriginal} — Audio corrompu`);
-          }
+          fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          extractedFiles.audio++;
           continue;
         }
 
-        // Video
         if (ext === '.mp4' && isVideoEntry(entryName, entryNameFull)) {
           const qNum = extractQuestionNumber(baseNameOriginal);
           const dirPath = path.join(seriesDir, 'video');
           fs.mkdirSync(dirPath, { recursive: true });
           const saveName = qNum ? `q${qNum}.mp4` : baseNameOriginal;
-
-          if (isValidMp4(fileData) || fileData.length > 10000) {
-            fs.writeFileSync(path.join(dirPath, saveName), fileData);
-            extractedFiles.video++;
-          } else {
-            report.removed.push(`${baseNameOriginal} — Vidéo corrompue`);
-          }
+          fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          extractedFiles.video++;
           continue;
         }
-      } catch (fileErr) {
-        fileErrors.push(`Error saving ${baseNameOriginal}: ${fileErr}`);
-      }
+      } catch {}
     }
 
-    // Scan extracted files on disk
+    // Scan files on disk
     const imageFiles = scanDir(path.join(seriesDir, 'images'), ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'], extractQuestionNumber);
     const audioFiles = scanDir(path.join(seriesDir, 'audio'), ['.mp3', '.wav', '.ogg'], extractQuestionNumber);
     const responseFiles = scanDir(path.join(seriesDir, 'responses'), ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'], extractResponseNumber);
     const videoFiles = scanDir(path.join(seriesDir, 'video'), ['.mp4', '.webm', '.avi'], extractQuestionNumber);
-
-    // Verify files on disk
-    for (const sub of ['images', 'audio', 'video', 'responses'] as const) {
-      const subDir = path.join(seriesDir, sub);
-      if (fs.existsSync(subDir)) {
-        const files = fs.readdirSync(subDir);
-        if (sub === 'images') diskStats.imagesFound = files.length;
-        else if (sub === 'audio') diskStats.audioFound = files.length;
-        else if (sub === 'video') diskStats.videoFound = files.length;
-        else diskStats.responsesFound = files.length;
-      }
-    }
 
     // Process TXT and save questions
     let questionsImported = 0;
@@ -327,34 +596,34 @@ async function repairAndImportLocal(zipBuffer: Buffer, categoryCode: string, ser
       });
     }
 
-    const formatSize = (b: number) => {
-      if (b < 1024) return b + ' B';
-      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-      return (b / 1024 / 1024).toFixed(2) + ' MB';
-    };
-
     return {
-      report,
-      extracted: {
-        images: extractedFiles.images,
-        audio: extractedFiles.audio,
-        video: extractedFiles.video,
-        responses: extractedFiles.responses,
-        txtProcessed: !!txtContent,
-      },
-      compression: {
-        imagesCompressed: extractedFiles.compressed,
-        savedBytes: extractedFiles.savedBytes,
-        savedFormatted: formatSize(extractedFiles.savedBytes),
-      },
+      extracted: extractedFiles,
       questionsImported,
-      diskStats,
-      fileErrors: fileErrors.length > 0 ? fileErrors : undefined,
+      success: true,
+      message: `✅ ${questionsImported} question(s) importée(s) avec succès pour ${categoryCode}/${serieNumber}`,
     };
   } catch (error) {
-    console.error('Repair+Import error:', error);
+    console.error('Import repaired ZIP error:', error);
     throw error;
   }
+}
+
+// =====================================================================
+// LEGACY: Full Repair + Import in one shot (desktop mode)
+// =====================================================================
+async function repairAndImportLocal(zipBuffer: Buffer, categoryCode: string, serieNumber: number) {
+  // Step 1: prepare
+  const prepareResult = await repairAndPrepare(zipBuffer, categoryCode);
+  // Step 2: import
+  const repairedBuffer = Buffer.from(prepareResult.repairedZipBase64, 'base64');
+  const importResult = await importRepairedZip(repairedBuffer, categoryCode, serieNumber);
+
+  return {
+    report: prepareResult.report,
+    compression: prepareResult.compression,
+    extracted: importResult.extracted,
+    questionsImported: importResult.questionsImported,
+  };
 }
 
 // Process TXT and save questions to JSON + DB
@@ -436,9 +705,9 @@ async function processTxtAndSaveQuestions(txtContent: string, categoryCode: stri
 }
 
 // =====================================================================
-// CLOUD MODE: Repair ZIP buffer and return new ZIP
+// CLOUD MODE: Legacy repair ZIP buffer and return new ZIP
 // =====================================================================
-async function repairZipBuffer(zipBuffer: Buffer): Promise<{ report: typeof report; repairedBuffer: Buffer }> {
+async function repairZipBuffer(zipBuffer: Buffer): Promise<{ report: { repaired: string[]; removed: string[]; skipped: string[] }; repairedBuffer: Buffer }> {
   const report = {
     repaired: [] as string[],
     removed: [] as string[],
@@ -474,7 +743,6 @@ async function repairZipBuffer(zipBuffer: Buffer): Promise<{ report: typeof repo
     const dirName = entryName.substring(0, entryName.length - baseName.length);
     let fileData = entry.getData();
 
-    // Images
     if (['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif'].includes(ext)) {
       if (isValidImage(fileData)) {
         newZip.addFile(entry.entryName, fileData);
@@ -491,7 +759,6 @@ async function repairZipBuffer(zipBuffer: Buffer): Promise<{ report: typeof repo
       continue;
     }
 
-    // Audio
     if (ext === '.mp3') {
       if (isValidMp3(fileData)) {
         newZip.addFile(entry.entryName, fileData);
@@ -504,7 +771,6 @@ async function repairZipBuffer(zipBuffer: Buffer): Promise<{ report: typeof repo
       continue;
     }
 
-    // Video
     if (ext === '.mp4') {
       if (isValidMp4(fileData)) {
         newZip.addFile(entry.entryName, fileData);
