@@ -1,0 +1,103 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const role = searchParams.get('role')
+
+    const users = await db.user.findMany({
+      where: role ? { role } : undefined,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        cin: true,
+        nomFr: true,
+        prenomFr: true,
+        nomAr: true,
+        prenomAr: true,
+        photo: true,
+        permisCategory: true,
+        examDate: true,
+        pinCode: true,
+        isActive: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+
+    return NextResponse.json({ users })
+  } catch (error) {
+    console.error('GET users error:', error)
+    return NextResponse.json(
+      { error: 'Erreur serveur: ' + String(error) },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const {
+      cin,
+      password,
+      nomFr,
+      prenomFr,
+      nomAr,
+      prenomAr,
+      photo,
+      permisCategory,
+      examDate,
+      pinCode,
+      isActive,
+      role,
+    } = body
+
+    if (!cin) {
+      return NextResponse.json(
+        { error: 'CIN est requis' },
+        { status: 400 }
+      )
+    }
+
+    const existing = await db.user.findUnique({
+      where: { cin },
+    })
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'Un utilisateur avec ce CIN existe déjà' },
+        { status: 409 }
+      )
+    }
+
+    const user = await db.user.create({
+      data: {
+        cin,
+        password: password || '1234',
+        nomFr: nomFr || null,
+        prenomFr: prenomFr || null,
+        nomAr: nomAr || null,
+        prenomAr: prenomAr || null,
+        photo: photo || null,
+        permisCategory: permisCategory || 'B',
+        examDate: examDate || null,
+        pinCode: pinCode || '',
+        isActive: isActive !== undefined ? isActive : true,
+        role: role || 'user',
+      },
+    })
+
+    const { password: _, ...userWithoutPassword } = user
+
+    return NextResponse.json({ user: userWithoutPassword }, { status: 201 })
+  } catch (error) {
+    console.error('POST users error:', error)
+    return NextResponse.json(
+      { error: 'Erreur serveur: ' + String(error) },
+      { status: 500 }
+    )
+  }
+}

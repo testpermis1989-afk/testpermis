@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Permis Maroc - Activation</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #333; }
+
+    /* HEADER */
+    .header { background: linear-gradient(135deg, #1a7f37, #2ea043); color: white; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+    .header h1 { font-size: 20px; font-weight: 700; }
+    .header span { font-size: 13px; opacity: 0.85; }
+    .header-actions { margin-left: auto; display: flex; gap: 8px; }
+
+    /* BUTTONS */
+    .btn { padding: 8px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { background: #2ea043; color: white; }
+    .btn-primary:hover { background: #238636; }
+    .btn-danger { background: #da3633; color: white; }
+    .btn-danger:hover { background: #b62324; }
+    .btn-outline { background: white; color: #333; border: 2px solid #ddd; }
+    .btn-outline:hover { border-color: #2ea043; color: #2ea043; }
+    .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+    /* TABS */
+    .tabs { display: flex; gap: 0; background: white; border-bottom: 2px solid #e5e7eb; padding: 0 24px; }
+    .tab { padding: 12px 24px; font-size: 14px; font-weight: 600; color: #666; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
+    .tab:hover { color: #333; }
+    .tab.active { color: #2ea043; border-bottom-color: #2ea043; }
+
+    /* PANELS */
+    .panel { display: none; padding: 24px; }
+    .panel.active { display: block; }
+
+    /* CARDS */
+    .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; }
+    .card h2 { font-size: 16px; margin-bottom: 16px; color: #333; }
+    .card h3 { font-size: 14px; color: #666; font-weight: 600; margin-bottom: 8px; }
+
+    /* MACHINE CODE */
+    .machine-code-box { display: flex; align-items: center; gap: 12px; background: #f6f8fa; border: 2px solid #d0d7de; border-radius: 10px; padding: 14px 16px; }
+    .machine-code-box code { font-size: 24px; font-weight: 800; letter-spacing: 3px; color: #1a7f37; font-family: 'Consolas', monospace; }
+    .copy-btn { padding: 8px 16px; background: #2ea043; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .copy-btn:hover { background: #238636; }
+
+    /* FORM */
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #555; margin-bottom: 6px; }
+    .form-group input, .form-group select { width: 100%; padding: 10px 14px; border: 2px solid #ddd; border-radius: 8px; font-size: 15px; font-family: inherit; transition: border-color 0.2s; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: #2ea043; }
+    .form-group input::placeholder { color: #aaa; }
+
+    /* STATUS */
+    .status-card { display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 12px; }
+    .status-active { background: #dafbe1; border: 2px solid #2ea043; }
+    .status-inactive { background: #ffebe9; border: 2px solid #da3633; }
+    .status-icon { font-size: 36px; }
+    .status-info h3 { font-size: 16px; font-weight: 700; }
+    .status-info p { font-size: 13px; color: #666; margin-top: 4px; }
+
+    /* TABLE */
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f6f8fa; padding: 10px 14px; text-align: left; font-weight: 600; color: #555; border-bottom: 2px solid #e5e7eb; }
+    td { padding: 10px 14px; border-bottom: 1px solid #eee; }
+    tr:hover { background: #f9f9f9; }
+    .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+    .badge-active { background: #dafbe1; color: #1a7f37; }
+    .badge-expired { background: #ffebe9; color: #da3633; }
+
+    /* ALERT */
+    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+    .alert-success { background: #dafbe1; color: #1a7f37; border: 1px solid #2ea043; }
+    .alert-error { background: #ffebe9; color: #da3633; border: 1px solid #da3633; }
+    .alert-info { background: #ddf4ff; color: #0969da; border: 1px solid #0969da; }
+
+    /* MODAL OVERLAY */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal { background: white; border-radius: 16px; padding: 32px; width: 420px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+    .modal h2 { font-size: 18px; margin-bottom: 20px; }
+
+    /* EMPTY STATE */
+    .empty-state { text-align: center; padding: 40px; color: #999; }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    /* Admin login */
+    .admin-panel { display: none; }
+    .admin-panel.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <div style="font-size: 28px;">&#x1F697;</div>
+    <div>
+      <h1>Permis Maroc</h1>
+      <span>Outil d'Activation et Suivi</span>
+    </div>
+    <div class="header-actions">
+      <div id="adminSection" style="display:none;">
+        <button class="btn btn-outline btn-sm" onclick="logoutAdmin()">&#x1F6AA; Deconnexion Admin</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('activation')">&#x1F511; Activation</div>
+    <div class="tab" onclick="switchTab('admin')" id="adminTab" style="display:none;">&#x1F4CA; Admin Panel</div>
+  </div>
+
+  <!-- TAB: ACTIVATION -->
+  <div class="panel active" id="panel-activation">
+
+    <!-- Status -->
+    <div id="statusCard" class="card">
+      <div class="status-card status-inactive" id="statusBox">
+        <div class="status-icon" id="statusIcon">&#x1F512;</div>
+        <div class="status-info">
+          <h3 id="statusTitle">Non active</h3>
+          <p id="statusDetail">Chargement...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Machine Code -->
+    <div class="card">
+      <h2>&#x1F4BB; Code Machine de cet ordinateur</h2>
+      <p style="font-size:13px;color:#888;margin-bottom:12px;">Envoyez ce code a votre administrateur pour obtenir un code d'activation</p>
+      <div class="machine-code-box">
+        <code id="machineCodeDisplay">Chargement...</code>
+        <button class="copy-btn" onclick="copyMachineCode()">&#x1F4CB; Copier</button>
+      </div>
+    </div>
+
+    <!-- Activate -->
+    <div class="card" id="activateCard">
+      <h2>&#x1F510; Entrer le code d'activation</h2>
+      <div id="activateAlert"></div>
+      <div class="form-group">
+        <label>Code d'activation</label>
+        <input type="text" id="activationCodeInput" placeholder="XXXX-30D-250407" style="font-family:Consolas,monospace;letter-spacing:2px;" onkeyup="this.value=this.value.toUpperCase()">
+      </div>
+      <button class="btn btn-primary" onclick="doActivate()" id="activateBtn">&#x2714; Activer</button>
+    </div>
+  </div>
+
+  <!-- TAB: ADMIN -->
+  <div class="panel" id="panel-admin">
+
+    <!-- Admin Login -->
+    <div class="card" id="adminLoginCard">
+      <h2>&#x1F512; Acces Administrateur</h2>
+      <div class="form-group">
+        <label>Mot de passe admin</label>
+        <input type="password" id="adminPasswordInput" placeholder="Mot de passe..." onkeydown="if(event.key==='Enter')doAdminLogin()">
+      </div>
+      <button class="btn btn-primary" onclick="doAdminLogin()">Se connecter</button>
+    </div>
+
+    <!-- Admin Panel -->
+    <div class="admin-panel" id="adminPanel">
+
+      <!-- Generate Code -->
+      <div class="card">
+        <h2>&#x1F511; Generer un code d'activation</h2>
+        <div id="generateAlert"></div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Code Machine du client</label>
+            <input type="text" id="clientMachineCodeInput" placeholder="XXXX-XXXX-XXXX-XXXX" style="font-family:Consolas,monospace;letter-spacing:2px;" onkeyup="this.value=this.value.toUpperCase()">
+          </div>
+          <div class="form-group">
+            <label>Duree</label>
+            <select id="durationSelect">
+              <option value="2d">2 jours</option>
+              <option value="7d">7 jours</option>
+              <option value="30d">30 jours</option>
+              <option value="90d">90 jours</option>
+              <option value="6mo">6 mois</option>
+              <option value="1yr" selected>1 an</option>
+              <option value="unlimited">Illimitee</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="doGenerateCode()">&#x2795; Generer le code</button>
+        <div id="generatedCodeResult" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- Licenses List -->
+      <div class="card">
+        <h2>&#x1F4CB; Licenses generees (<span id="licenseCount">0</span>)</h2>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Code Activation</th>
+                <th>Machine</th>
+                <th>Duree</th>
+                <th>Expiration</th>
+                <th>Statut</th>
+                <th>Supprimer</th>
+              </tr>
+            </thead>
+            <tbody id="licensesTableBody">
+            </tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="licensesEmpty" style="display:none;">
+          <div class="icon">&#x1F4C2;</div>
+          <p>Aucune license generee</p>
+        </div>
+      </div>
+
+      <!-- Activations -->
+      <div class="card">
+        <h2>&#x2705; Activations en cours (<span id="activationCount">0</span>)</h2>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Machine</th>
+                <th>Code</th>
+                <th>Duree</th>
+                <th>Expiration</th>
+                <th>Date Activation</th>
+                <th>Statut</th>
+                <th>Supprimer</th>
+              </tr>
+            </thead>
+            <tbody id="activationsTableBody">
+            </tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="activationsEmpty" style="display:none;">
+          <div class="icon">&#x1F4E6;</div>
+          <p>Aucune activation</p>
+        </div>
+      </div>
+
+      <!-- Change Admin Password -->
+      <div class="card">
+        <h2>&#x1F510; Modifier le mot de passe admin</h2>
+        <div id="passwordAlert"></div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label>Ancien mot de passe</label>
+            <input type="password" id="oldPasswordInput" placeholder="Ancien mot de passe...">
+          </div>
+          <div class="form-group">
+            <label>Nouveau mot de passe</label>
+            <input type="password" id="newPasswordInput" placeholder="Nouveau mot de passe..." onkeydown="if(event.key==='Enter')doChangePassword()">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="doChangePassword()">&#x1F504; Modifier le mot de passe</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL: Generated Code -->
+  <div class="modal-overlay" id="codeModal">
+    <div class="modal">
+      <h2>&#x2705; Code Genere!</h2>
+      <p style="font-size:13px;color:#888;margin-bottom:12px;">Envoyez ce code au client</p>
+      <div class="machine-code-box" style="margin-bottom:16px;">
+        <code id="generatedCodeDisplay" style="font-size:18px;">-</code>
+        <button class="copy-btn" onclick="copyGeneratedCode()">&#x1F4CB; Copier</button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div class="card" style="flex:1;padding:12px;margin:0;">
+          <h3>Duree</h3>
+          <p id="modalDuration" style="font-size:18px;font-weight:700;color:#1a7f37;">-</p>
+        </div>
+        <div class="card" style="flex:1;padding:12px;margin:0;">
+          <h3>Expiration</h3>
+          <p id="modalExpiry" style="font-size:18px;font-weight:700;color:#1a7f37;">-</p>
+        </div>
+      </div>
+      <button class="btn btn-outline" style="width:100%;margin-top:16px;" onclick="closeModal()">Fermer</button>
+    </div>
+  </div>
+
+  <script>
+    let machineInfo = null;
+    let isAdmin = false;
+    let lastGeneratedCode = '';
+
+    // =====================================================
+    // INIT
+    // =====================================================
+    async function init() {
+      machineInfo = await window.api.getMachineInfo();
+      document.getElementById('machineCodeDisplay').textContent = machineInfo.machineCode;
+      await refreshStatus();
+    }
+
+    // =====================================================
+    // TAB SWITCHING
+    // =====================================================
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById(`panel-${tab}`).classList.add('active');
+      document.querySelector(`.tab[onclick*="${tab}"]`).classList.add('active');
+    }
+
+    // =====================================================
+    // STATUS
+    // =====================================================
+    async function refreshStatus() {
+      const status = await window.api.getStatus();
+      const box = document.getElementById('statusBox');
+      const icon = document.getElementById('statusIcon');
+      const title = document.getElementById('statusTitle');
+      const detail = document.getElementById('statusDetail');
+
+      if (status.activated) {
+        box.className = 'status-card status-active';
+        icon.innerHTML = '&#x2705;';
+        title.textContent = 'Active';
+        detail.textContent = `Expire le ${status.expiryDate} | ${status.durationLabel}`;
+        document.getElementById('activateCard').style.display = 'none';
+      } else if (status.reason === 'expired') {
+        box.className = 'status-card status-inactive';
+        icon.innerHTML = '&#x26A0;&#xFE0F;';
+        title.textContent = 'Expiree';
+        detail.textContent = `Expiree le ${status.expiryDate}`;
+        document.getElementById('activateCard').style.display = 'block';
+      } else {
+        box.className = 'status-card status-inactive';
+        icon.innerHTML = '&#x1F512;';
+        title.textContent = 'Non active';
+        detail.textContent = 'Entrez un code d\'activation ci-dessous';
+        document.getElementById('activateCard').style.display = 'block';
+      }
+    }
+
+    // =====================================================
+    // COPY
+    // =====================================================
+    async function copyMachineCode() {
+      const code = document.getElementById('machineCodeDisplay').textContent;
+      await navigator.clipboard.writeText(code);
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = '&#x2705; Copie!';
+      setTimeout(() => { btn.innerHTML = '&#x1F4CB; Copier'; }, 2000);
+    }
+
+    async function copyGeneratedCode() {
+      await navigator.clipboard.writeText(lastGeneratedCode);
+    }
+
+    // =====================================================
+    // ACTIVATE
+    // =====================================================
+    async function doActivate() {
+      const code = document.getElementById('activationCodeInput').value.trim();
+      if (!code) {
+        showAlert('activateAlert', 'Veuillez entrer un code d\'activation', 'error');
+        return;
+      }
+      const btn = document.getElementById('activateBtn');
+      btn.textContent = 'Activation...';
+      btn.disabled = true;
+
+      const result = await window.api.activate(code);
+      if (result.success) {
+        showAlert('activateAlert', `Active avec succes! Expire le ${result.expiryDate}`, 'success');
+        document.getElementById('activationCodeInput').value = '';
+        await refreshStatus();
+      } else {
+        showAlert('activateAlert', result.error, 'error');
+      }
+
+      btn.textContent = '\u2714 Activer';
+      btn.disabled = false;
+    }
+
+    // =====================================================
+    // ADMIN
+    // =====================================================
+    async function doAdminLogin() {
+      const password = document.getElementById('adminPasswordInput').value;
+      const result = await window.api.adminLogin(password);
+      if (result.success) {
+        isAdmin = true;
+        document.getElementById('adminLoginCard').style.display = 'none';
+        document.getElementById('adminPanel').classList.add('visible');
+        document.getElementById('adminSection').style.display = 'block';
+        document.getElementById('adminPasswordInput').value = '';
+        await refreshAdminData();
+      } else {
+        alert('Mot de passe incorrect!');
+      }
+    }
+
+    function logoutAdmin() {
+      isAdmin = false;
+      document.getElementById('adminLoginCard').style.display = 'block';
+      document.getElementById('adminPanel').classList.remove('visible');
+      document.getElementById('adminSection').style.display = 'none';
+      switchTab('activation');
+    }
+
+    // =====================================================
+    // GENERATE CODE
+    // =====================================================
+    async function doGenerateCode() {
+      const machineCode = document.getElementById('clientMachineCodeInput').value.trim();
+      const durationCode = document.getElementById('durationSelect').value;
+
+      if (!machineCode || machineCode.length < 19) {
+        showAlert('generateAlert', 'Veuillez entrer un code machine valide (XXXX-XXXX-XXXX-XXXX)', 'error');
+        return;
+      }
+
+      // Convert machineCode to hash (same algorithm as Electron main)
+      const result = await window.api.generateCode(machineCode, durationCode);
+      if (result.success) {
+        lastGeneratedCode = result.code;
+        document.getElementById('generatedCodeDisplay').textContent = result.code;
+        document.getElementById('modalDuration').textContent = result.durationLabel;
+        document.getElementById('modalExpiry').textContent = result.expiryDate;
+        document.getElementById('codeModal').classList.add('active');
+        document.getElementById('clientMachineCodeInput').value = '';
+        showAlert('generateAlert', '', '');
+        await refreshAdminData();
+      } else {
+        showAlert('generateAlert', 'Erreur lors de la generation', 'error');
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('codeModal').classList.remove('active');
+    }
+
+    // =====================================================
+    // ADMIN DATA
+    // =====================================================
+    async function refreshAdminData() {
+      const data = await window.api.getActivations();
+
+      // Licenses table
+      const licensesBody = document.getElementById('licensesTableBody');
+      document.getElementById('licenseCount').textContent = data.licenses.length;
+      if (data.licenses.length === 0) {
+        licensesBody.innerHTML = '';
+        document.getElementById('licensesEmpty').style.display = 'block';
+      } else {
+        document.getElementById('licensesEmpty').style.display = 'none';
+        licensesBody.innerHTML = data.licenses.map(l => {
+          const isExpired = new Date(l.expiryDate) < new Date();
+          const statusBadge = isExpired
+            ? '<span class="badge badge-expired">Expiree</span>'
+            : '<span class="badge badge-active">Active</span>';
+          return `<tr>
+            <td><code style="font-size:12px;letter-spacing:1px;">${l.activationCode}</code></td>
+            <td><code style="font-size:11px;">${l.machineCode || '-'}</code></td>
+            <td>${l.durationLabel}</td>
+            <td>${l.expiryDate}</td>
+            <td>${statusBadge}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteLicense('${l.activationCode}')">&#x1F5D1;</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Activations table
+      const activationsBody = document.getElementById('activationsTableBody');
+      document.getElementById('activationCount').textContent = data.activations.length;
+      if (data.activations.length === 0) {
+        activationsBody.innerHTML = '';
+        document.getElementById('activationsEmpty').style.display = 'block';
+      } else {
+        document.getElementById('activationsEmpty').style.display = 'none';
+        activationsBody.innerHTML = data.activations.map(a => {
+          const isExpired = new Date(a.expiryDate) < new Date();
+          const statusBadge = isExpired
+            ? '<span class="badge badge-expired">Expiree</span>'
+            : '<span class="badge badge-active">Active</span>';
+          return `<tr>
+            <td><code style="font-size:11px;">${a.machineCode}</code></td>
+            <td><code style="font-size:12px;letter-spacing:1px;">${a.activationCode}</code></td>
+            <td>${a.durationLabel}</td>
+            <td>${a.expiryDate}</td>
+            <td>${new Date(a.activatedAt).toLocaleString('fr-FR')}</td>
+            <td>${statusBadge}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteActivation('${a.activationCode}')">&#x1F5D1;</button></td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    async function deleteLicense(code) {
+      if (!confirm('Supprimer cette license?')) return;
+      await window.api.deleteLicense(code);
+      await refreshAdminData();
+    }
+
+    async function deleteActivation(code) {
+      if (!confirm('Supprimer cette activation?')) return;
+      await window.api.deleteLicense(code);
+      await refreshAdminData();
+    }
+
+    // =====================================================
+    // CHANGE PASSWORD
+    // =====================================================
+    async function doChangePassword() {
+      const oldPassword = document.getElementById('oldPasswordInput').value;
+      const newPassword = document.getElementById('newPasswordInput').value;
+
+      if (!oldPassword || !newPassword) {
+        showAlert('passwordAlert', 'Remplissez tous les champs', 'error');
+        return;
+      }
+
+      const result = await window.api.changeAdminPassword(oldPassword, newPassword);
+      if (result.success) {
+        showAlert('passwordAlert', 'Mot de passe modifie avec succes!', 'success');
+        document.getElementById('oldPasswordInput').value = '';
+        document.getElementById('newPasswordInput').value = '';
+      } else {
+        showAlert('passwordAlert', result.error, 'error');
+      }
+    }
+
+    // =====================================================
+    // HELPERS
+    // =====================================================
+    function showAlert(elementId, message, type) {
+      const el = document.getElementById(elementId);
+      if (!message) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+    }
+
+    // Show admin tab
+    document.getElementById('adminTab').style.display = 'block';
+
+    // Start
+    init();
+  </script>
+</body>
+</html>
