@@ -5,11 +5,15 @@
  * Key is derived from Machine ID (CPU, disk, etc.) so files can only be
  * decrypted on the same machine where they were imported.
  * 
- * Encrypted files are stored with .enc extension and a binary header:
- *   [5 bytes: "PMENC"] [2 bytes: original ext length] [original ext] [IV: 12 bytes] [auth tag: 16 bytes] [encrypted data]
+ * Supports TWO encrypted file formats:
  * 
- * The PMENC magic header allows quick identification of encrypted files
- * without attempting decryption.
+ *   NEW format (with PMENC magic header):
+ *     [5 bytes: "PMENC"] [2 bytes: original ext length] [original ext] [IV: 12 bytes] [auth tag: 16 bytes] [encrypted data]
+ * 
+ *   OLD format (no magic header, for backward compatibility):
+ *     [2 bytes: original ext length] [original ext] [IV: 12 bytes] [auth tag: 16 bytes] [encrypted data]
+ * 
+ * Encryption can be disabled via env var DISABLE_FILE_ENCRYPTION=true
  */
 import crypto from 'crypto';
 import fs from 'fs';
@@ -27,7 +31,7 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
 
-// Magic header to identify encrypted files
+// Magic header for NEW format
 const MAGIC_HEADER = Buffer.from('PMENC');
 const MAGIC_HEADER_LENGTH = MAGIC_HEADER.length; // 5 bytes
 
@@ -35,12 +39,18 @@ const MAGIC_HEADER_LENGTH = MAGIC_HEADER.length; // 5 bytes
 let cachedKey: Buffer | null = null;
 
 /**
+ * Check if file encryption is enabled
+ * Can be disabled via DISABLE_FILE_ENCRYPTION env var
+ */
+export function isEncryptionEnabled(): boolean {
+  return process.env.DISABLE_FILE_ENCRYPTION !== 'true';
+}
+
+/**
  * Get a machine-specific identifier
  * Combines multiple hardware identifiers to create a unique machine fingerprint
  */
 function getMachineId(): string {
-  // Use a combination of system info to create a unique machine ID
-  // This works across platforms and doesn't require any native modules
   const hostname = os.hostname();
   const platform = os.platform();
   const arch = os.arch();
@@ -48,7 +58,6 @@ function getMachineId(): string {
   const tmpdir = os.tmpdir();
   const homedir = os.homedir();
   
-  // Combine into a unique string
   const machineString = `permis-maroc:${platform}:${arch}:${hostname}:${tmpdir}:${homedir}:${cpus}`;
   
   return machineString;
@@ -94,7 +103,6 @@ export function encryptBuffer(data: Buffer, originalExt: string): Buffer {
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   
-  // Encrypt using AES-256-GCM (provides authentication + encryption)
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   
   const encrypted = Buffer.concat([
@@ -102,10 +110,8 @@ export function encryptBuffer(data: Buffer, originalExt: string): Buffer {
     cipher.final(),
   ]);
   
-  // Get auth tag
   const authTag = cipher.getAuthTag();
   
-  // Encode extension
   const extBuffer = Buffer.from(originalExt, 'utf-8');
   const extLength = Buffer.alloc(2);
   extLength.writeUInt16LE(extBuffer.length);
@@ -115,23 +121,26 @@ export function encryptBuffer(data: Buffer, originalExt: string): Buffer {
 }
 
 /**
- * Decrypt a Buffer (that was encrypted with encryptBuffer)
+ * Decrypt a Buffer - supports BOTH old and new formats
+ * 
  * Returns { data: Buffer; ext: string } or null if decryption fails
  */
 export function decryptBuffer(encryptedData: Buffer): { data: Buffer; ext: string } | null {
   try {
-    // Check minimum size: PMENC(5) + extLength(2) + ext(0+) + IV(12) + authTag(16) = 35+
-    const minSize = MAGIC_HEADER_LENGTH + 2 + IV_LENGTH + AUTH_TAG_LENGTH;
-    if (encryptedData.length < minSize) return null;
-    
     const key = getEncryptionKey();
     
-    // Verify PMENC magic header
-    if (!hasPMENCHeader(encryptedData)) {
-      return null;
-    }
+    let offset = 0;
+    let hasMagic = false;
     
-    let offset = MAGIC_HEADER_LENGTH; // skip "PMENC"
+    // Check if data has PMENC magic header (new format)
+    if (hasPMENCHeader(encryptedData)) {
+      hasMagic = true;
+      offset = MAGIC_HEADER_LENGTH; // skip "PMENC"
+    }
+    // Otherwise assume OLD format (no magic header, starts directly with ext length)
+    
+    // Check minimum size: extLength(2) + IV(12) + authTag(16) = 30+
+    if (encryptedData.length - offset < 2 + IV_LENGTH + AUTH_TAG_LENGTH) return null;
     
     // Read extension length (2 bytes)
     const extLength = encryptedData.readUInt16LE(offset);
@@ -157,6 +166,8 @@ export function decryptBuffer(encryptedData: Buffer): { data: Buffer; ext: strin
     // Read encrypted data
     const encrypted = encryptedData.slice(offset);
     
+    if (encrypted.length === 0) return null;
+    
     // Decrypt
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
@@ -179,16 +190,16 @@ export function decryptBuffer(encryptedData: Buffer): { data: Buffer; ext: strin
  * Original file is deleted after successful encryption
  */
 export function encryptFile(filePath: string): boolean {
+  if (!isEncryptionEnabled()) return false;
+  
   try {
     if (!fs.existsSync(filePath)) return false;
     
     const ext = path.extname(filePath).toLowerCase();
     const fileData = fs.readFileSync(filePath);
     
-    // Encrypt
     const encrypted = encryptBuffer(fileData, ext);
     
-    // Save with .enc extension
     const encPath = filePath + '.enc';
     fs.writeFileSync(encPath, encrypted);
     
@@ -205,6 +216,7 @@ export function encryptFile(filePath: string): boolean {
 /**
  * Decrypt a .enc file and return the content + original extension
  * Uses in-memory cache for performance
+ * Supports both PMENC (new) and legacy (old) encrypted formats
  */
 export function decryptFileCached(encFilePath: string): { data: Buffer; ext: string } | null {
   // Check cache first
@@ -214,7 +226,6 @@ export function decryptFileCached(encFilePath: string): { data: Buffer; ext: str
     return decryptBuffer(cached.buffer);
   }
   
-  // Read and decrypt
   if (!fs.existsSync(encFilePath)) return null;
   
   try {
@@ -224,7 +235,6 @@ export function decryptFileCached(encFilePath: string): { data: Buffer; ext: str
     if (result) {
       // Update cache (evict old entries if cache is full)
       if (decryptCache.size >= CACHE_MAX_SIZE) {
-        // Remove oldest entry
         let oldest: string | null = null;
         let oldestTime = Infinity;
         for (const [key, val] of decryptCache) {
@@ -255,8 +265,14 @@ export function isEncryptedFile(filePath: string): boolean {
 /**
  * Encrypt all files in a directory recursively
  * Skips .enc files, .json files, .txt files
+ * Can be disabled via DISABLE_FILE_ENCRYPTION env var
  */
 export function encryptDirectory(dirPath: string): { encrypted: number; failed: number } {
+  if (!isEncryptionEnabled()) {
+    console.log('[FileEncrypt] Encryption disabled (DISABLE_FILE_ENCRYPTION=true), skipping:', dirPath);
+    return { encrypted: 0, failed: 0 };
+  }
+  
   let encrypted = 0;
   let failed = 0;
   
@@ -272,12 +288,10 @@ export function encryptDirectory(dirPath: string): { encrypted: number; failed: 
       const entryStat = fs.statSync(fullPath);
       
       if (entryStat.isDirectory()) {
-        // Recurse into subdirectories
         const subResult = encryptDirectory(fullPath);
         encrypted += subResult.encrypted;
         failed += subResult.failed;
       } else if (entryStat.isFile()) {
-        // Skip already encrypted files, and non-media files
         const lowerName = entry.toLowerCase();
         if (lowerName.endsWith('.enc')) continue;
         if (lowerName.endsWith('.json')) continue;
@@ -285,7 +299,6 @@ export function encryptDirectory(dirPath: string): { encrypted: number; failed: 
         if (lowerName.endsWith('.db')) continue;
         if (lowerName.endsWith('.sqlite')) continue;
         
-        // Only encrypt media files
         const ext = path.extname(fullPath).toLowerCase();
         const mediaExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.svg', '.mp3', '.mp4', '.wav', '.ogg', '.aac', '.webm'];
         if (!mediaExts.includes(ext)) continue;
@@ -302,6 +315,51 @@ export function encryptDirectory(dirPath: string): { encrypted: number; failed: 
   }
   
   return { encrypted, failed };
+}
+
+/**
+ * Decrypt all .enc files in a directory, replacing them with original files
+ * Useful for migration or when encryption needs to be removed
+ */
+export function decryptDirectory(dirPath: string): { decrypted: number; failed: number } {
+  let decrypted = 0;
+  let failed = 0;
+  
+  try {
+    if (!fs.existsSync(dirPath)) return { decrypted: 0, failed: 0 };
+    
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) return { decrypted: 0, failed: 0 };
+    
+    const entries = fs.readdirSync(dirPath);
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry);
+      const entryStat = fs.statSync(fullPath);
+      
+      if (entryStat.isDirectory()) {
+        const subResult = decryptDirectory(fullPath);
+        decrypted += subResult.decrypted;
+        failed += subResult.failed;
+      } else if (entryStat.isFile() && entry.toLowerCase().endsWith('.enc')) {
+        const result = decryptFileCached(fullPath);
+        if (result) {
+          // Restore original file
+          const originalPath = fullPath.slice(0, -4); // remove .enc
+          fs.writeFileSync(originalPath, result.data);
+          // Remove .enc file
+          try { fs.unlinkSync(fullPath); } catch {}
+          decrypted++;
+        } else {
+          console.warn('[FileEncrypt] Failed to decrypt:', fullPath);
+          failed++;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[FileEncrypt] Error decrypting directory:', dirPath, (e as Error).message);
+  }
+  
+  return { decrypted, failed };
 }
 
 /**
