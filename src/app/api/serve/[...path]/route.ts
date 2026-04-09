@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { decryptFileCached, isEncryptedFile, getOriginalFilename } from '@/lib/file-encryption';
 
 const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -21,15 +22,43 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 // Extensions to try when a file is not found (ordered by likelihood)
-const FALLBACK_EXTENSIONS = ['.webp', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.mp3', '.mp4', '.webm', '.svg'];
+const FALLBACK_EXTENSIONS = ['.enc', '.webp', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.mp3', '.mp4', '.webm', '.svg'];
 
 function serveFile(filePath: string, contentType: string): NextResponse | null {
   try {
     const stat = fs.statSync(filePath);
     if (!stat.isFile()) return null;
 
-    const buffer = fs.readFileSync(filePath);
+    let buffer: Buffer;
     const ext = path.extname(filePath).toLowerCase();
+
+    // Handle encrypted files (.enc)
+    if (ext === '.enc') {
+      const result = decryptFileCached(filePath);
+      if (!result) {
+        console.warn(`[Serve] Failed to decrypt: ${filePath}`);
+        return null;
+      }
+      buffer = result.data;
+      // Use the original file's MIME type
+      const originalExt = result.ext.toLowerCase();
+      const originalContentType = MIME_TYPES[originalExt] || 'application/octet-stream';
+      const isMedia = ['.mp3', '.mp4', '.webm', '.wav', '.ogg', '.aac'].includes(originalExt);
+
+      return new NextResponse(buffer, {
+        status: 200,
+        headers: {
+          'Content-Type': originalContentType,
+          'Content-Length': buffer.length.toString(),
+          'Cache-Control': isMedia ? 'no-cache' : 'public, max-age=31536000, immutable',
+          ...(originalContentType.startsWith('video/') || originalContentType.startsWith('audio/') ? {
+            'Accept-Ranges': 'bytes',
+          } : {}),
+        },
+      });
+    }
+
+    buffer = fs.readFileSync(filePath);
     const isMedia = ['.mp3', '.mp4', '.webm', '.wav', '.ogg', '.aac'].includes(ext);
 
     return new NextResponse(buffer, {
@@ -80,6 +109,7 @@ export async function GET(
     }
 
     // 2. Try alternative extensions (same basename, different ext)
+    // .enc is first priority since all encrypted files use this extension
     const dir = path.dirname(fullPath);
     const baseName = path.basename(fullPath, path.extname(fullPath));
 
@@ -95,7 +125,7 @@ export async function GET(
 
       // 3. FUZZY FALLBACK: Search directory for any file matching the question number
       // This handles cases where files were saved with different naming conventions
-      // e.g., URL requests 'q1.png' but actual file is 'question1.jpg' or '1.png'
+      // e.g., URL requests 'q1.png' but actual file is 'q1.png.enc' or 'question1.jpg.enc'
       const num = extractNumberFromBasename(baseName);
       if (num !== null) {
         // Determine expected prefix: if baseName starts with 'r', look for response files
@@ -106,13 +136,19 @@ export async function GET(
           const dirFiles = fs.readdirSync(dir);
           for (const f of dirFiles) {
             const fLower = f.toLowerCase();
-            const fNum = extractNumberFromBasename(path.basename(f, path.extname(f)));
+            // Get the base name without .enc if it's encrypted
+            let fBaseName = f;
+            if (f.endsWith('.enc')) {
+              fBaseName = f.slice(0, -4);
+            }
+            const fNum = extractNumberFromBasename(path.basename(fBaseName, path.extname(fBaseName)));
+
             // Match by number and prefix pattern
             if (fNum === num) {
-              const fExt = path.extname(f).toLowerCase();
+              const fExt = path.extname(fBaseName).toLowerCase();
               // Prioritize files that match the expected prefix (q or r)
               const startsWithPrefix = fLower.startsWith(prefix.toLowerCase());
-              if (startsWithPrefix || (FALLBACK_EXTENSIONS as readonly string[]).includes(fExt)) {
+              if (startsWithPrefix || (FALLBACK_EXTENSIONS as readonly string[]).includes(fExt) || f.endsWith('.enc')) {
                 const matchPath = path.join(dir, f);
                 if (fs.existsSync(matchPath)) {
                   const contentType = MIME_TYPES[fExt] || 'application/octet-stream';

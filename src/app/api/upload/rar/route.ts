@@ -4,6 +4,7 @@ import fs from 'fs';
 import AdmZip from 'adm-zip';
 import { saveSerieQuestions } from '@/lib/series-file';
 import { compressMp3, compressMp4, isFfmpegAvailable } from '@/lib/media-compress';
+import { encryptDirectory } from '@/lib/file-encryption';
 
 // Lazy load database - only when needed
 async function getDb() {
@@ -368,6 +369,12 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
     // Process TXT and create entries - PRIMARY: JSON file, SECONDARY: DB
     if (extractedFiles.txtFile && typeof extractedFiles.txtFile === 'string') {
       questionsImported = await processTxtContentLocal(extractedFiles.txtFile, categoryCode, serieNumber, fileNames);
+    }
+
+    // Encrypt all media files to prevent copying (AES-256-GCM with machine-specific key)
+    const encResult = encryptDirectory(seriesDir);
+    if (encResult.encrypted > 0) {
+      console.log(`[Import] Encrypted ${encResult.encrypted} files in ${categoryCode}/${serieNumber}`);
     }
   } catch (error) {
     console.error('Extraction error:', error);

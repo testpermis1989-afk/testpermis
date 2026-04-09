@@ -21,26 +21,66 @@ let ffmpegAvailable: boolean | null = null;
 /**
  * Get FFmpeg binary path
  * Tries: @ffmpeg-installer/ffmpeg → system PATH → common Windows paths
+ * Uses purely dynamic require to avoid Turbopack build analysis
  */
 export function getFfmpegPath(): string | null {
   if (ffmpegChecked) return ffmpegPath;
   ffmpegChecked = true;
 
+  // Method 1: Find ffmpeg binary by scanning node_modules directly
+  // This avoids any require() that Turbopack could trace
   try {
-    // Try @ffmpeg-installer/ffmpeg first (bundled binary)
-    const installer = require('@ffmpeg-installer/ffmpeg');
-    if (installer && installer.path && fs.existsSync(installer.path)) {
-      ffmpegPath = installer.path;
-      ffmpegAvailable = true;
-      console.log('[MediaCompress] Using bundled FFmpeg:', ffmpegPath);
-      return ffmpegPath;
+    const nodeModulesDir = findNodeModules();
+    if (nodeModulesDir) {
+      const platform = process.platform === 'win32' ? 'win32-x64'
+        : process.platform === 'darwin' ? 'darwin-x64'
+        : 'linux-x64';
+      const arch = process.arch === 'arm64' ? `${process.platform}-arm64` : undefined;
+      const candidates = [
+        path.join(nodeModulesDir, '@ffmpeg-installer', platform, 'ffmpeg'),
+        arch ? path.join(nodeModulesDir, '@ffmpeg-installer', arch, 'ffmpeg') : null,
+        path.join(nodeModulesDir, '@ffmpeg-installer', 'ffmpeg', 'ffmpeg'),
+      ].filter(Boolean) as string[];
+
+      // Add .exe suffix for Windows
+      for (const c of candidates) {
+        const exePath = process.platform === 'win32' ? c + '.exe' : c;
+        if (fs.existsSync(exePath)) {
+          ffmpegPath = exePath;
+          ffmpegAvailable = true;
+          console.log('[MediaCompress] Found bundled FFmpeg:', ffmpegPath);
+          return ffmpegPath;
+        }
+      }
     }
   } catch (e) {
-    console.log('[MediaCompress] @ffmpeg-installer/ffmpeg not available');
+    console.log('[MediaCompress] @ffmpeg-installer/ffmpeg scan failed');
   }
 
-  // For runtime detection in production (Electron), try system PATH
-  // This will be checked lazily on first use
+  return null;
+}
+
+/**
+ * Find node_modules directory by walking up from __dirname
+ */
+function findNodeModules(): string | null {
+  // In standalone mode, node_modules is next to the server
+  const candidates = [
+    /*turbopackIgnore: true*/ process.cwd(),
+    path.dirname(/*turbopackIgnore: true*/ process.argv[1] || ''),
+    __dirname,
+  ];
+
+  for (const startDir of candidates) {
+    let dir = startDir;
+    for (let i = 0; i < 5; i++) {
+      const nm = path.join(dir, 'node_modules');
+      if (fs.existsSync(nm)) return nm;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
   return null;
 }
 
@@ -192,45 +232,6 @@ export async function compressMp4(
     safeUnlink(inputPath);
     safeUnlink(outputPath);
   }
-}
-
-/**
- * Compress media file based on extension
- * @param fileData - Original file data
- * @param filename - File name (used to determine type)
- * @returns { data: Buffer, compressed: boolean }
- */
-export async function compressMediaFile(
-  fileData: Buffer,
-  filename: string
-): Promise<{ data: Buffer; compressed: boolean; savedBytes: number }> {
-  const ext = path.extname(filename).toLowerCase();
-
-  if (ext === '.mp3') {
-    const compressed = await compressMp3(fileData);
-    if (compressed) {
-      return {
-        data: compressed,
-        compressed: true,
-        savedBytes: fileData.length - compressed.length,
-      };
-    }
-    return { data: fileData, compressed: false, savedBytes: 0 };
-  }
-
-  if (ext === '.mp4') {
-    const compressed = await compressMp4(fileData);
-    if (compressed) {
-      return {
-        data: compressed,
-        compressed: true,
-        savedBytes: fileData.length - compressed.length,
-      };
-    }
-    return { data: fileData, compressed: false, savedBytes: 0 };
-  }
-
-  return { data: fileData, compressed: false, savedBytes: 0 };
 }
 
 /**

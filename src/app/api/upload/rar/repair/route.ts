@@ -4,6 +4,7 @@ import fs from 'fs';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, hasUploadJob, saveUploadJob } from '@/lib/upload-store';
 import { compressMp3, compressMp4 } from '@/lib/media-compress';
+import { encryptDirectory } from '@/lib/file-encryption';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
 let jimpModule: any = null;
@@ -659,6 +660,12 @@ async function importRepairedZip(zipBuffer: Buffer, categoryCode: string, serieN
 
     // Mark TXT as processed if we found and used it
     extractedFiles.txtProcessed = !!txtContent && questionsImported > 0;
+
+    // Encrypt all media files to prevent copying
+    const encResult = encryptDirectory(seriesDir);
+    if (encResult.encrypted > 0) {
+      console.log(`[Repair+Import] Encrypted ${encResult.encrypted} files in ${categoryCode}/${serieNumber}`);
+    }
 
     return {
       extracted: extractedFiles,
