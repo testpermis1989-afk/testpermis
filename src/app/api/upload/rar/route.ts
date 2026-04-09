@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
 import { saveSerieQuestions } from '@/lib/series-file';
+import { compressMp3, compressMp4, isFfmpegAvailable } from '@/lib/media-compress';
 
 // Lazy load database - only when needed
 async function getDb() {
@@ -279,7 +280,19 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
           const dirPath = path.join(seriesDir, 'audio');
           fs.mkdirSync(dirPath, { recursive: true });
           const saveName = qNum ? `q${qNum}.mp3` : baseNameOriginal;
-          fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          // Compress MP3: re-encode to 64kbps mono
+          try {
+            const compressed = await compressMp3(fileData);
+            if (compressed && compressed.length < fileData.length) {
+              fs.writeFileSync(path.join(dirPath, saveName), compressed);
+              extractedFiles.compressed++;
+              extractedFiles.savedBytes += (fileData.length - compressed.length);
+            } else {
+              fs.writeFileSync(path.join(dirPath, saveName), fileData);
+            }
+          } catch {
+            fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          }
           extractedFiles.audio++;
           continue;
         }
@@ -289,7 +302,19 @@ async function extractAndImportLocal(zipBuffer: Buffer, categoryCode: string, se
           const dirPath = path.join(seriesDir, 'video');
           fs.mkdirSync(dirPath, { recursive: true });
           const saveName = qNum ? `q${qNum}.mp4` : baseNameOriginal;
-          fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          // Compress MP4: re-encode to 480p H.264
+          try {
+            const compressed = await compressMp4(fileData);
+            if (compressed && compressed.length < fileData.length) {
+              fs.writeFileSync(path.join(dirPath, saveName), compressed);
+              extractedFiles.compressed++;
+              extractedFiles.savedBytes += (fileData.length - compressed.length);
+            } else {
+              fs.writeFileSync(path.join(dirPath, saveName), fileData);
+            }
+          } catch {
+            fs.writeFileSync(path.join(dirPath, saveName), fileData);
+          }
           extractedFiles.video++;
           continue;
         }

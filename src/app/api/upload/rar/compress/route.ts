@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, getUploadJob, deleteUploadJob, hasUploadJob } from '@/lib/upload-store';
+import { compressMp3, compressMp4 } from '@/lib/media-compress';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
 let jimpModule: any = null;
@@ -111,24 +112,53 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Audio files - keep as-is (ffmpeg not available on Vercel serverless)
+        // Audio files - compress with FFmpeg (64kbps mono)
         if (ext === '.mp3') {
           const originalSize = fileData.length;
-          newZip.addFile(stripParent + dirName + baseName, fileData);
-          // Still track it as "processed" so the UI shows it
-          result.audio.compressed++;
-          result.audio.beforeBytes += originalSize;
-          result.audio.afterBytes += originalSize;
+          try {
+            const compressed = await compressMp3(fileData);
+            if (compressed && compressed.length < originalSize) {
+              newZip.addFile(stripParent + dirName + baseName, compressed);
+              result.audio.compressed++;
+              result.audio.beforeBytes += originalSize;
+              result.audio.afterBytes += compressed.length;
+            } else {
+              newZip.addFile(stripParent + dirName + baseName, fileData);
+              result.audio.compressed++;
+              result.audio.beforeBytes += originalSize;
+              result.audio.afterBytes += originalSize;
+            }
+          } catch {
+            newZip.addFile(stripParent + dirName + baseName, fileData);
+            result.audio.compressed++;
+            result.audio.beforeBytes += originalSize;
+            result.audio.afterBytes += originalSize;
+          }
           continue;
         }
 
-        // Video files - keep as-is (ffmpeg not available on Vercel serverless)
+        // Video files - compress with FFmpeg (480p H.264)
         if (ext === '.mp4') {
           const originalSize = fileData.length;
-          newZip.addFile(stripParent + dirName + baseName, fileData);
-          result.video.compressed++;
-          result.video.beforeBytes += originalSize;
-          result.video.afterBytes += originalSize;
+          try {
+            const compressed = await compressMp4(fileData);
+            if (compressed && compressed.length < originalSize) {
+              newZip.addFile(stripParent + dirName + baseName, compressed);
+              result.video.compressed++;
+              result.video.beforeBytes += originalSize;
+              result.video.afterBytes += compressed.length;
+            } else {
+              newZip.addFile(stripParent + dirName + baseName, fileData);
+              result.video.compressed++;
+              result.video.beforeBytes += originalSize;
+              result.video.afterBytes += originalSize;
+            }
+          } catch {
+            newZip.addFile(stripParent + dirName + baseName, fileData);
+            result.video.compressed++;
+            result.video.beforeBytes += originalSize;
+            result.video.afterBytes += originalSize;
+          }
           continue;
         }
 

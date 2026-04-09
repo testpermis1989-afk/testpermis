@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { supabase, uploadFile, downloadFile, listFiles } from '@/lib/supabase';
+import { compressMp3, compressMp4 } from '@/lib/media-compress';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
 let jimpModule: any = null;
@@ -34,7 +35,8 @@ async function jimpCompress(fileData: Buffer): Promise<Buffer | null> {
 
 // POST /api/series/repair - Réparer les fichiers corrompus d'une série existante
 // Images: réparées avec Jimp (100% JavaScript)
-// Audio/Vidéo: validation + report (pas de réparation possible sans FFmpeg natif)
+// Audio: réparées + compressées avec FFmpeg (64kbps mono)
+// Vidéo: réparées + compressées avec FFmpeg (480p H.264)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -130,7 +132,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // ===== AUDIO MP3 - validation only =====
+    // ===== AUDIO MP3 - repair + compress with FFmpeg =====
     const audioFolder = `${storagePrefix}/audio`;
     try {
       const audios = await listFiles(audioFolder);
@@ -140,13 +142,27 @@ export async function POST(request: NextRequest) {
         const audioStoragePath = `${audioFolder}/${audio}`;
         try {
           const fileData = await downloadFile(audioStoragePath);
-          if (isValidMp3(fileData)) continue; // Déjà valide
+          const originalSize = fileData.length;
 
-          if (fileData.length > 1000) {
-            report.skipped.push(`audio/${audio} — Conservé (headers non standards)`);
-          } else {
+          if (!isValidMp3(fileData) && fileData.length < 1000) {
             try { await supabase.storage.from('uploads').remove([audioStoragePath]); } catch {}
             report.removed.push(`audio/${audio} — Corrompu (trop petit: ${fileData.length} octets)`);
+            continue;
+          }
+
+          // Try to compress with FFmpeg
+          try {
+            const compressed = await compressMp3(fileData);
+            if (compressed && compressed.length < originalSize) {
+              await uploadFile(audioStoragePath, compressed, 'audio/mpeg');
+              report.repaired.push(`audio/${audio} — Compressé (${(originalSize / 1024).toFixed(0)}KB → ${(compressed.length / 1024).toFixed(0)}KB) ✓`);
+            } else if (!isValidMp3(fileData)) {
+              report.skipped.push(`audio/${audio} — Conservé (headers non standards)`);
+            }
+          } catch {
+            if (!isValidMp3(fileData)) {
+              report.skipped.push(`audio/${audio} — Conservé (compression échouée)`);
+            }
           }
         } catch (err) {
           console.error(`Error downloading audio ${audio}:`, err);
@@ -154,7 +170,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // ===== VIDÉO MP4 - validation only =====
+    // ===== VIDÉO MP4 - repair + compress with FFmpeg =====
     const videoFolder = `${storagePrefix}/video`;
     try {
       const videos = await listFiles(videoFolder);
@@ -164,13 +180,27 @@ export async function POST(request: NextRequest) {
         const videoStoragePath = `${videoFolder}/${video}`;
         try {
           const fileData = await downloadFile(videoStoragePath);
-          if (isValidMp4(fileData)) continue; // Déjà valide
+          const originalSize = fileData.length;
 
-          if (fileData.length > 10000) {
-            report.skipped.push(`video/${video} — Conservée (container non standard)`);
-          } else {
+          if (!isValidMp4(fileData) && fileData.length < 10000) {
             try { await supabase.storage.from('uploads').remove([videoStoragePath]); } catch {}
             report.removed.push(`video/${video} — Corrompue (trop petite: ${fileData.length} octets)`);
+            continue;
+          }
+
+          // Try to compress with FFmpeg
+          try {
+            const compressed = await compressMp4(fileData);
+            if (compressed && compressed.length < originalSize) {
+              await uploadFile(videoStoragePath, compressed, 'video/mp4');
+              report.repaired.push(`video/${video} — Compressé (${(originalSize / 1024 / 1024).toFixed(1)}MB → ${(compressed.length / 1024 / 1024).toFixed(1)}MB) ✓`);
+            } else if (!isValidMp4(fileData)) {
+              report.skipped.push(`video/${video} — Conservée (container non standard)`);
+            }
+          } catch {
+            if (!isValidMp4(fileData)) {
+              report.skipped.push(`video/${video} — Conservée (compression échouée)`);
+            }
           }
         } catch (err) {
           console.error(`Error downloading video ${video}:`, err);
@@ -243,7 +273,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Validate local audio
+      // Repair + compress local audio with FFmpeg
       const localAudioDir = path.join(localSeriePath, 'audio');
       if (fs.existsSync(localAudioDir)) {
         for (const file of fs.readdirSync(localAudioDir)) {
@@ -251,16 +281,24 @@ export async function POST(request: NextRequest) {
           const filePath = path.join(localAudioDir, file);
           try {
             const fileData = fs.readFileSync(filePath);
-            if (isValidMp3(fileData)) continue;
-            if (fileData.length < 1000) {
+            if (!isValidMp3(fileData) && fileData.length < 1000) {
               try { fs.unlinkSync(filePath); } catch {}
               report.removed.push(`[local] audio/${file} — Corrompu`);
+              continue;
             }
+            // Try to compress
+            try {
+              const compressed = await compressMp3(fileData);
+              if (compressed && compressed.length < fileData.length) {
+                fs.writeFileSync(filePath, compressed);
+                report.repaired.push(`[local] audio/${file} — Compressé ✓`);
+              }
+            } catch {}
           } catch {}
         }
       }
 
-      // Validate local video
+      // Repair + compress local video with FFmpeg
       const localVideoDir = path.join(localSeriePath, 'video');
       if (fs.existsSync(localVideoDir)) {
         for (const file of fs.readdirSync(localVideoDir)) {
@@ -268,11 +306,19 @@ export async function POST(request: NextRequest) {
           const filePath = path.join(localVideoDir, file);
           try {
             const fileData = fs.readFileSync(filePath);
-            if (isValidMp4(fileData)) continue;
-            if (fileData.length < 10000) {
+            if (!isValidMp4(fileData) && fileData.length < 10000) {
               try { fs.unlinkSync(filePath); } catch {}
               report.removed.push(`[local] video/${file} — Corrompue`);
+              continue;
             }
+            // Try to compress
+            try {
+              const compressed = await compressMp4(fileData);
+              if (compressed && compressed.length < fileData.length) {
+                fs.writeFileSync(filePath, compressed);
+                report.repaired.push(`[local] video/${file} — Compressé ✓`);
+              }
+            } catch {}
           } catch {}
         }
       }

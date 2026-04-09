@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/lib/db';
 import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
+import { compressMp3, compressMp4 } from '@/lib/media-compress';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
 let jimpModule: any = null;
@@ -174,7 +175,7 @@ export async function POST(request: NextRequest) {
       }
     } catch {}
 
-    // 3. Audio & Video - skip compression (ffmpeg not available on Vercel)
+    // 3. Audio - compress with FFmpeg (64kbps mono for voice)
     const audioFolder = `${storagePrefix}/audio`;
     try {
       const files = await listFiles(audioFolder);
@@ -183,10 +184,27 @@ export async function POST(request: NextRequest) {
         const storagePath = `${audioFolder}/${file}`;
         try {
           const fileData = await downloadFile(storagePath);
-          result.audio.compressed++;
-          result.audio.beforeBytes += fileData.length;
-          result.audio.afterBytes += fileData.length;
-        } catch {}
+          const originalSize = fileData.length;
+          try {
+            const compressed = await compressMp3(fileData);
+            if (compressed && compressed.length < originalSize) {
+              await uploadFile(storagePath, compressed, 'audio/mpeg');
+              result.audio.compressed++;
+              result.audio.beforeBytes += originalSize;
+              result.audio.afterBytes += compressed.length;
+            } else {
+              result.audio.compressed++;
+              result.audio.beforeBytes += originalSize;
+              result.audio.afterBytes += originalSize;
+            }
+          } catch {
+            result.audio.compressed++;
+            result.audio.beforeBytes += originalSize;
+            result.audio.afterBytes += originalSize;
+          }
+        } catch (err) {
+          console.error(`Failed to download audio ${file}:`, err);
+        }
       }
     } catch {}
 
@@ -198,10 +216,27 @@ export async function POST(request: NextRequest) {
         const storagePath = `${videoFolder}/${file}`;
         try {
           const fileData = await downloadFile(storagePath);
-          result.video.compressed++;
-          result.video.beforeBytes += fileData.length;
-          result.video.afterBytes += fileData.length;
-        } catch {}
+          const originalSize = fileData.length;
+          try {
+            const compressed = await compressMp4(fileData);
+            if (compressed && compressed.length < originalSize) {
+              await uploadFile(storagePath, compressed, 'video/mp4');
+              result.video.compressed++;
+              result.video.beforeBytes += originalSize;
+              result.video.afterBytes += compressed.length;
+            } else {
+              result.video.compressed++;
+              result.video.beforeBytes += originalSize;
+              result.video.afterBytes += originalSize;
+            }
+          } catch {
+            result.video.compressed++;
+            result.video.beforeBytes += originalSize;
+            result.video.afterBytes += originalSize;
+          }
+        } catch (err) {
+          console.error(`Failed to download video ${file}:`, err);
+        }
       }
     } catch {}
 

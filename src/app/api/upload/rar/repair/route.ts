@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
 import { getUploadBuffer, hasUploadJob, saveUploadJob } from '@/lib/upload-store';
+import { compressMp3, compressMp4 } from '@/lib/media-compress';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
 let jimpModule: any = null;
@@ -396,23 +397,53 @@ async function repairAndPrepare(zipBuffer: Buffer, categoryCode?: string) {
       continue;
     }
 
-    // Audio
+    // Audio - compress with FFmpeg
     if (ext === '.mp3' && isAudioEntry(entryName, entryNameFull)) {
       const qNum = extractQuestionNumber(baseNameOriginal);
       const sizeBefore = fileData.length;
       totalBefore += sizeBefore;
 
       if (isValidMp3(fileData) || fileData.length > 1000) {
-        newZip.addFile(entry.entryName, fileData);
-        fileDetails.push({
-          name: baseNameOriginal,
-          type: 'audio',
-          status: 'ok',
-          sizeBefore,
-          sizeAfter: sizeBefore,
-          questionNum: qNum ?? undefined,
-        });
-        totalAfter += sizeBefore;
+        // Try to compress MP3
+        try {
+          const compressed = await compressMp3(fileData);
+          if (compressed && compressed.length < fileData.length) {
+            const mp3Name = qNum ? `q${qNum}.mp3` : baseNameOriginal;
+            newZip.addFile(stripParent + (qNum ? 'audio/' : '') + mp3Name, compressed);
+            compressedCount++;
+            fileDetails.push({
+              name: mp3Name,
+              type: 'audio',
+              status: 'compressed',
+              sizeBefore,
+              sizeAfter: compressed.length,
+              questionNum: qNum ?? undefined,
+            });
+            totalAfter += compressed.length;
+          } else {
+            newZip.addFile(entry.entryName, fileData);
+            fileDetails.push({
+              name: baseNameOriginal,
+              type: 'audio',
+              status: 'ok',
+              sizeBefore,
+              sizeAfter: sizeBefore,
+              questionNum: qNum ?? undefined,
+            });
+            totalAfter += sizeBefore;
+          }
+        } catch {
+          newZip.addFile(entry.entryName, fileData);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'audio',
+            status: 'ok',
+            sizeBefore,
+            sizeAfter: sizeBefore,
+            questionNum: qNum ?? undefined,
+          });
+          totalAfter += sizeBefore;
+        }
       } else {
         report.removed.push(`${baseNameOriginal} — Audio corrompu`);
         fileDetails.push({
@@ -427,23 +458,53 @@ async function repairAndPrepare(zipBuffer: Buffer, categoryCode?: string) {
       continue;
     }
 
-    // Video
+    // Video - compress with FFmpeg
     if (ext === '.mp4' && isVideoEntry(entryName, entryNameFull)) {
       const qNum = extractQuestionNumber(baseNameOriginal);
       const sizeBefore = fileData.length;
       totalBefore += sizeBefore;
 
       if (isValidMp4(fileData) || fileData.length > 10000) {
-        newZip.addFile(entry.entryName, fileData);
-        fileDetails.push({
-          name: baseNameOriginal,
-          type: 'video',
-          status: 'ok',
-          sizeBefore,
-          sizeAfter: sizeBefore,
-          questionNum: qNum ?? undefined,
-        });
-        totalAfter += sizeBefore;
+        // Try to compress MP4
+        try {
+          const compressed = await compressMp4(fileData);
+          if (compressed && compressed.length < fileData.length) {
+            const mp4Name = qNum ? `q${qNum}.mp4` : baseNameOriginal;
+            newZip.addFile(stripParent + (qNum ? 'video/' : '') + mp4Name, compressed);
+            compressedCount++;
+            fileDetails.push({
+              name: mp4Name,
+              type: 'video',
+              status: 'compressed',
+              sizeBefore,
+              sizeAfter: compressed.length,
+              questionNum: qNum ?? undefined,
+            });
+            totalAfter += compressed.length;
+          } else {
+            newZip.addFile(entry.entryName, fileData);
+            fileDetails.push({
+              name: baseNameOriginal,
+              type: 'video',
+              status: 'ok',
+              sizeBefore,
+              sizeAfter: sizeBefore,
+              questionNum: qNum ?? undefined,
+            });
+            totalAfter += sizeBefore;
+          }
+        } catch {
+          newZip.addFile(entry.entryName, fileData);
+          fileDetails.push({
+            name: baseNameOriginal,
+            type: 'video',
+            status: 'ok',
+            sizeBefore,
+            sizeAfter: sizeBefore,
+            questionNum: qNum ?? undefined,
+          });
+          totalAfter += sizeBefore;
+        }
       } else {
         report.removed.push(`${baseNameOriginal} — Vidéo corrompue`);
         fileDetails.push({
