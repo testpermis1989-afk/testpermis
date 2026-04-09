@@ -1,10 +1,14 @@
 /**
  * Media Compression Utility
  * Compresses MP3 audio and MP4 video files using FFmpeg
- * For Electron desktop app - uses native FFmpeg binary
+ * For Electron desktop app - uses FFmpeg from system PATH or bundled with Electron
  *
  * MP3: Re-encodes to 64kbps mono (optimized for voice/questions audio)
  * MP4: Re-encodes to 480p H.264 with lower bitrate (optimized for short clips)
+ *
+ * NOTE: fluent-ffmpeg and @ffmpeg-installer/ffmpeg have been removed to save disk space.
+ * This module now uses child_process.execFile to call the system FFmpeg binary directly.
+ * FFmpeg must be installed on the system or bundled with the Electron app.
  */
 import { execFile } from 'child_process';
 import path from 'path';
@@ -20,67 +24,32 @@ let ffmpegAvailable: boolean | null = null;
 
 /**
  * Get FFmpeg binary path
- * Tries: @ffmpeg-installer/ffmpeg → system PATH → common Windows paths
- * Uses purely dynamic require to avoid Turbopack build analysis
+ * Tries: system PATH -> common Windows paths
+ * No longer uses @ffmpeg-installer/ffmpeg (removed to save disk space)
  */
 export function getFfmpegPath(): string | null {
   if (ffmpegChecked) return ffmpegPath;
   ffmpegChecked = true;
 
-  // Method 1: Find ffmpeg binary by scanning node_modules directly
-  // This avoids any require() that Turbopack could trace
+  // Try to find ffmpeg in the app's resources directory (Electron)
   try {
-    const nodeModulesDir = findNodeModules();
-    if (nodeModulesDir) {
-      const platform = process.platform === 'win32' ? 'win32-x64'
-        : process.platform === 'darwin' ? 'darwin-x64'
-        : 'linux-x64';
-      const arch = process.arch === 'arm64' ? `${process.platform}-arm64` : undefined;
-      const candidates = [
-        path.join(nodeModulesDir, '@ffmpeg-installer', platform, 'ffmpeg'),
-        arch ? path.join(nodeModulesDir, '@ffmpeg-installer', arch, 'ffmpeg') : null,
-        path.join(nodeModulesDir, '@ffmpeg-installer', 'ffmpeg', 'ffmpeg'),
-      ].filter(Boolean) as string[];
+    const candidates = [
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'ffmpeg'),
+      path.join(/*turbopackIgnore: true*/ process.cwd(), 'resources', 'ffmpeg'),
+      path.join(/*turbopackIgnore: true*/ process.resourcesPath || '', 'ffmpeg'),
+    ];
 
-      // Add .exe suffix for Windows
-      for (const c of candidates) {
-        const exePath = process.platform === 'win32' ? c + '.exe' : c;
-        if (fs.existsSync(exePath)) {
-          ffmpegPath = exePath;
-          ffmpegAvailable = true;
-          console.log('[MediaCompress] Found bundled FFmpeg:', ffmpegPath);
-          return ffmpegPath;
-        }
+    for (const dir of candidates) {
+      const exePath = process.platform === 'win32' ? dir + '.exe' : dir;
+      if (fs.existsSync(exePath)) {
+        ffmpegPath = exePath;
+        ffmpegAvailable = true;
+        console.log('[MediaCompress] Found bundled FFmpeg:', ffmpegPath);
+        return ffmpegPath;
       }
     }
-  } catch (e) {
-    console.log('[MediaCompress] @ffmpeg-installer/ffmpeg scan failed');
-  }
+  } catch {}
 
-  return null;
-}
-
-/**
- * Find node_modules directory by walking up from __dirname
- */
-function findNodeModules(): string | null {
-  // In standalone mode, node_modules is next to the server
-  const candidates = [
-    /*turbopackIgnore: true*/ process.cwd(),
-    path.dirname(/*turbopackIgnore: true*/ process.argv[1] || ''),
-    __dirname,
-  ];
-
-  for (const startDir of candidates) {
-    let dir = startDir;
-    for (let i = 0; i < 5; i++) {
-      const nm = path.join(dir, 'node_modules');
-      if (fs.existsSync(nm)) return nm;
-      const parent = path.dirname(dir);
-      if (parent === dir) break;
-      dir = parent;
-    }
-  }
   return null;
 }
 

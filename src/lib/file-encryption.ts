@@ -6,7 +6,10 @@
  * decrypted on the same machine where they were imported.
  * 
  * Encrypted files are stored with .enc extension and a binary header:
- *   [4 bytes: original ext length] [original ext] [IV: 12 bytes] [encrypted data]
+ *   [5 bytes: "PMENC"] [2 bytes: original ext length] [original ext] [IV: 12 bytes] [auth tag: 16 bytes] [encrypted data]
+ * 
+ * The PMENC magic header allows quick identification of encrypted files
+ * without attempting decryption.
  */
 import crypto from 'crypto';
 import fs from 'fs';
@@ -23,6 +26,10 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
+
+// Magic header to identify encrypted files
+const MAGIC_HEADER = Buffer.from('PMENC');
+const MAGIC_HEADER_LENGTH = MAGIC_HEADER.length; // 5 bytes
 
 // Cached encryption key (derived once per process)
 let cachedKey: Buffer | null = null;
@@ -69,10 +76,19 @@ function getEncryptionKey(): Buffer {
 }
 
 /**
- * Encrypt a Buffer and return encrypted Buffer with header
+ * Check if a buffer starts with the PMENC magic header
+ */
+export function hasPMENCHeader(data: Buffer): boolean {
+  if (data.length < MAGIC_HEADER_LENGTH) return false;
+  return data.subarray(0, MAGIC_HEADER_LENGTH).equals(MAGIC_HEADER);
+}
+
+/**
+ * Encrypt a Buffer and return encrypted Buffer with PMENC header
  * 
  * Header format:
- *   [2 bytes: original extension length] [original extension bytes] [12 bytes: IV] [auth tag] [encrypted data]
+ *   [5 bytes: "PMENC"] [2 bytes: original extension length] [original extension bytes]
+ *   [12 bytes: IV] [16 bytes: auth tag] [encrypted data]
  */
 export function encryptBuffer(data: Buffer, originalExt: string): Buffer {
   const key = getEncryptionKey();
@@ -94,42 +110,52 @@ export function encryptBuffer(data: Buffer, originalExt: string): Buffer {
   const extLength = Buffer.alloc(2);
   extLength.writeUInt16LE(extBuffer.length);
   
-  // Combine: extLength + ext + iv + authTag + encrypted
-  return Buffer.concat([extLength, extBuffer, iv, authTag, encrypted]);
+  // Combine: PMENC magic + extLength + ext + iv + authTag + encrypted
+  return Buffer.concat([MAGIC_HEADER, extLength, extBuffer, iv, authTag, encrypted]);
 }
 
 /**
  * Decrypt a Buffer (that was encrypted with encryptBuffer)
- * Returns { data: Buffer, ext: string } or null if decryption fails
+ * Returns { data: Buffer; ext: string } or null if decryption fails
  */
 export function decryptBuffer(encryptedData: Buffer): { data: Buffer; ext: string } | null {
   try {
-    if (encryptedData.length < IV_LENGTH + AUTH_TAG_LENGTH + 4) return null;
+    // Check minimum size: PMENC(5) + extLength(2) + ext(0+) + IV(12) + authTag(16) = 35+
+    const minSize = MAGIC_HEADER_LENGTH + 2 + IV_LENGTH + AUTH_TAG_LENGTH;
+    if (encryptedData.length < minSize) return null;
     
     const key = getEncryptionKey();
     
+    // Verify PMENC magic header
+    if (!hasPMENCHeader(encryptedData)) {
+      return null;
+    }
+    
+    let offset = MAGIC_HEADER_LENGTH; // skip "PMENC"
+    
     // Read extension length (2 bytes)
-    const extLength = encryptedData.readUInt16LE(0);
+    const extLength = encryptedData.readUInt16LE(offset);
+    offset += 2;
     
     // Validate extension length
-    if (extLength > 20 || 2 + extLength + IV_LENGTH + AUTH_TAG_LENGTH > encryptedData.length) {
+    if (extLength > 20 || offset + extLength + IV_LENGTH + AUTH_TAG_LENGTH > encryptedData.length) {
       return null;
     }
     
     // Read extension
-    const ext = encryptedData.slice(2, 2 + extLength).toString('utf-8');
+    const ext = encryptedData.slice(offset, offset + extLength).toString('utf-8');
+    offset += extLength;
     
     // Read IV
-    const ivStart = 2 + extLength;
-    const iv = encryptedData.slice(ivStart, ivStart + IV_LENGTH);
+    const iv = encryptedData.slice(offset, offset + IV_LENGTH);
+    offset += IV_LENGTH;
     
     // Read auth tag
-    const authTagStart = ivStart + IV_LENGTH;
-    const authTag = encryptedData.slice(authTagStart, authTagStart + AUTH_TAG_LENGTH);
+    const authTag = encryptedData.slice(offset, offset + AUTH_TAG_LENGTH);
+    offset += AUTH_TAG_LENGTH;
     
     // Read encrypted data
-    const dataStart = authTagStart + AUTH_TAG_LENGTH;
-    const encrypted = encryptedData.slice(dataStart);
+    const encrypted = encryptedData.slice(offset);
     
     // Decrypt
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);

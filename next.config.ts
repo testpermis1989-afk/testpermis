@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ['@prisma/client', 'adm-zip', 'unrar', 'jimp', 'fluent-ffmpeg'],
+  serverExternalPackages: ['@prisma/client', 'adm-zip', 'unrar', 'jimp'],
   allowedDevOrigins: [
     'preview-chat-03782b20-9da7-447d-a01b-6851e7199e59.space.z.ai',
     '.space.z.ai',
