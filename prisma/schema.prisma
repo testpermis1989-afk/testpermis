@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider  = "sqlite"
   url       = env("DATABASE_URL")
 }
 
@@ -117,5 +117,5 @@ model License {
   durationLabel  String
   durationDays   Int
   expiryDate     String
-  createdAt      String   @default(now())
+  createdAt      DateTime @default(now())
 }
