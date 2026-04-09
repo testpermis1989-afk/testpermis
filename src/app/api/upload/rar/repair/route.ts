@@ -556,7 +556,7 @@ async function importRepairedZip(zipBuffer: Buffer, categoryCode: string, serieN
   const dataDir = getLocalDataDir();
   const seriesDir = path.join(dataDir, 'uploads', `series/${categoryCode}/${serieNumber}`);
 
-  let extractedFiles = { images: 0, audio: 0, video: 0, responses: 0 };
+  let extractedFiles = { images: 0, audio: 0, video: 0, responses: 0, txtProcessed: false as boolean };
 
   try {
     if (fs.existsSync(seriesDir)) {
@@ -656,6 +656,9 @@ async function importRepairedZip(zipBuffer: Buffer, categoryCode: string, serieN
         imageFiles, audioFiles, responseFiles, videoFiles,
       });
     }
+
+    // Mark TXT as processed if we found and used it
+    extractedFiles.txtProcessed = !!txtContent && questionsImported > 0;
 
     return {
       extracted: extractedFiles,
