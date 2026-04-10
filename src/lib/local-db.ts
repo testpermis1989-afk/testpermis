@@ -361,13 +361,21 @@ export const localDb = {
       }
       return null;
     },
-    findMany: async (args?: { where?: { isActive?: boolean }; orderBy?: any; select?: any }) => {
+    findMany: async (args?: { where?: { isActive?: boolean; role?: string }; orderBy?: any; select?: any }) => {
       const db = await getDb();
       let sql = 'SELECT * FROM "User"';
       const params: any[] = [];
+      const conditions: string[] = [];
+      if (args?.where?.role !== undefined) {
+        conditions.push('role = ?');
+        params.push(args.where.role);
+      }
       if (args?.where?.isActive !== undefined) {
-        sql += ' WHERE isActive = ?';
+        conditions.push('isActive = ?');
         params.push(args.where.isActive ? 1 : 0);
+      }
+      if (conditions.length > 0) {
+        sql += ' WHERE ' + conditions.join(' AND ');
       }
       sql += ' ORDER BY createdAt DESC';
       const rows = await (await db.prepare(sql)).all(...params);
