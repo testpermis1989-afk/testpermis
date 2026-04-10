@@ -1,14 +1,13 @@
 /**
  * Media Compression Utility
- * Compresses MP3 audio and MP4 video files using FFmpeg
- * For Electron desktop app - uses FFmpeg from system PATH or bundled with Electron
- *
+ * Compresses MP3 audio and MP4 video files
+ * 
+ * Strategy (auto-fallback, NO system dependencies required):
+ *   1. System FFmpeg (fastest, native performance - if installed)
+ *   2. ffmpeg-static (bundled binary - ALWAYS works, ~76MB)
+ * 
  * MP3: Re-encodes to 64kbps mono (optimized for voice/questions audio)
  * MP4: Re-encodes to 480p H.264 with lower bitrate (optimized for short clips)
- *
- * NOTE: fluent-ffmpeg and @ffmpeg-installer/ffmpeg have been removed to save disk space.
- * This module now uses child_process.execFile to call the system FFmpeg binary directly.
- * FFmpeg must be installed on the system or bundled with the Electron app.
  */
 import { execFile } from 'child_process';
 import path from 'path';
@@ -18,87 +17,96 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-let ffmpegPath: string | null = null;
-let ffmpegChecked = false;
-let ffmpegAvailable: boolean | null = null;
+// ===== Resolve FFmpeg binary =====
+let _resolvedFfmpeg: string | null = null;
+let _ffmpegChecked = false;
 
 /**
- * Get FFmpeg binary path
- * Tries: system PATH -> common Windows paths
- * No longer uses @ffmpeg-installer/ffmpeg (removed to save disk space)
+ * Resolve the best available FFmpeg binary.
+ * Priority: bundled Electron -> system PATH -> ffmpeg-static (npm)
+ * Always succeeds because ffmpeg-static is a bundled fallback.
  */
-export function getFfmpegPath(): string | null {
-  if (ffmpegChecked) return ffmpegPath;
-  ffmpegChecked = true;
+export async function isFfmpegAvailable(): Promise<boolean> {
+  return !!(await resolveFfmpeg());
+}
 
-  // Try to find ffmpeg in the app's resources directory (Electron)
+export function getFfmpegPath(): string | null {
+  if (_resolvedFfmpeg) return _resolvedFfmpeg;
+  return null;
+}
+
+/**
+ * Get the absolute path to the FFmpeg binary (guaranteed to work)
+ * Tries: bundled with Electron -> system PATH -> common Windows paths -> ffmpeg-static (npm package)
+ */
+async function resolveFfmpeg(): Promise<string | null> {
+  if (_ffmpegChecked) return _resolvedFfmpeg;
+  _ffmpegChecked = true;
+
+  // 1. Try bundled with Electron app
   try {
     const candidates = [
       path.join(/*turbopackIgnore: true*/ process.cwd(), 'ffmpeg'),
       path.join(/*turbopackIgnore: true*/ process.cwd(), 'resources', 'ffmpeg'),
       path.join(/*turbopackIgnore: true*/ process.resourcesPath || '', 'ffmpeg'),
     ];
-
     for (const dir of candidates) {
       const exePath = process.platform === 'win32' ? dir + '.exe' : dir;
       if (fs.existsSync(exePath)) {
-        ffmpegPath = exePath;
-        ffmpegAvailable = true;
-        console.log('[MediaCompress] Found bundled FFmpeg:', ffmpegPath);
-        return ffmpegPath;
+        _resolvedFfmpeg = exePath;
+        console.log('[MediaCompress] Using bundled FFmpeg:', _resolvedFfmpeg);
+        return _resolvedFfmpeg;
       }
     }
   } catch {}
 
-  return null;
-}
-
-/**
- * Check if FFmpeg is available (async - can check system PATH)
- */
-export async function isFfmpegAvailable(): Promise<boolean> {
-  if (ffmpegAvailable !== null) return ffmpegAvailable;
-
-  // Check bundled first
-  if (getFfmpegPath()) return true;
-
-  // Try system ffmpeg
+  // 2. Try system FFmpeg (PATH)
   try {
     await execFileAsync('ffmpeg', ['-version'], { timeout: 5000 });
-    ffmpegPath = 'ffmpeg';
-    ffmpegAvailable = true;
+    _resolvedFfmpeg = 'ffmpeg';
     console.log('[MediaCompress] Using system FFmpeg');
-    return true;
-  } catch {
-    // Try common Windows paths
+    return _resolvedFfmpeg;
+  } catch {}
+
+  // 3. Try common Windows paths
+  try {
     const winPaths = [
       'C:\\ffmpeg\\bin\\ffmpeg.exe',
       path.join(process.env.ProgramFiles || '', 'ffmpeg', 'bin', 'ffmpeg.exe'),
       path.join(process.env.LOCALAPPDATA || '', 'Programs', 'ffmpeg', 'bin', 'ffmpeg.exe'),
     ];
     for (const p of winPaths) {
-      try {
-        fs.accessSync(p);
-        ffmpegPath = p;
-        ffmpegAvailable = true;
-        console.log('[MediaCompress] Found FFmpeg at:', p);
-        return true;
-      } catch {}
+      if (fs.existsSync(p)) {
+        _resolvedFfmpeg = p;
+        console.log('[MediaCompress] Found FFmpeg at:', _resolvedFfmpeg);
+        return _resolvedFfmpeg;
+      }
     }
+  } catch {}
 
-    ffmpegAvailable = false;
-    console.warn('[MediaCompress] FFmpeg not available - audio/video will not be compressed');
-    return false;
-  }
+  // 4. Use ffmpeg-static (bundled with npm - ALWAYS available, no system deps)
+  try {
+    const staticPath = require('ffmpeg-static') as string;
+    if (staticPath && fs.existsSync(staticPath)) {
+      _resolvedFfmpeg = staticPath;
+      console.log('[MediaCompress] Using ffmpeg-static (bundled, no system deps):', _resolvedFfmpeg);
+      return _resolvedFfmpeg;
+    }
+  } catch {}
+
+  console.error('[MediaCompress] ERROR: No FFmpeg binary found (not even ffmpeg-static)');
+  return null;
 }
+
+// ===== Main compression functions =====
 
 /**
  * Compress MP3 file
- * Re-encodes to lower bitrate (default: 64kbps mono for voice)
+ * Re-encodes to 64kbps mono 22050Hz (optimized for voice/questions)
  *
  * @param inputBuffer - Original MP3 file data
  * @param options - Compression options
- * @returns Compressed buffer, or null if FFmpeg unavailable or compression failed
+ * @returns Compressed buffer, or null if compression unavailable or didn't reduce size
  */
 export async function compressMp3(
   inputBuffer: Buffer,
@@ -107,15 +115,16 @@ export async function compressMp3(
   const ffmpeg = await resolveFfmpeg();
   if (!ffmpeg) return null;
 
+  const bitrate = options?.bitrate || '64k';
+  const channels = options?.channels || 1; // mono for voice questions
+
   const tmpDir = os.tmpdir();
-  const inputPath = path.join(tmpDir, `mc_input_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp3`);
-  const outputPath = path.join(tmpDir, `mc_output_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp3`);
+  const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputPath = path.join(tmpDir, `mc_in_${uid}.mp3`);
+  const outputPath = path.join(tmpDir, `mc_out_${uid}.mp3`);
 
   try {
     fs.writeFileSync(inputPath, inputBuffer);
-
-    const bitrate = options?.bitrate || '64k';
-    const channels = options?.channels || 1; // mono for voice questions
 
     await execFileAsync(ffmpeg, [
       '-i', inputPath,
@@ -133,7 +142,7 @@ export async function compressMp3(
       return outputBuffer;
     }
 
-    return null; // compression didn't help, return null (caller will use original)
+    return null;
   } catch (err) {
     console.warn('[MediaCompress] MP3 compression failed:', (err as Error).message);
     return null;
@@ -145,11 +154,11 @@ export async function compressMp3(
 
 /**
  * Compress MP4 video file
- * Re-encodes to 480p H.264 with lower bitrate
+ * Re-encodes to 480p H.264, CRF 28, 500kbps video, 64kbps audio
  *
  * @param inputBuffer - Original MP4 file data
  * @param options - Compression options
- * @returns Compressed buffer, or null if FFmpeg unavailable or compression failed
+ * @returns Compressed buffer, or null if compression unavailable or didn't reduce size
  */
 export async function compressMp4(
   inputBuffer: Buffer,
@@ -158,17 +167,18 @@ export async function compressMp4(
   const ffmpeg = await resolveFfmpeg();
   if (!ffmpeg) return null;
 
+  const width = options?.width || 854;
+  const height = options?.height || 480;
+  const videoBitrate = options?.videoBitrate || '500k';
+  const audioBitrate = options?.audioBitrate || '64k';
+
   const tmpDir = os.tmpdir();
-  const inputPath = path.join(tmpDir, `mc_input_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp4`);
-  const outputPath = path.join(tmpDir, `mc_output_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.mp4`);
+  const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputPath = path.join(tmpDir, `mc_in_${uid}.mp4`);
+  const outputPath = path.join(tmpDir, `mc_out_${uid}.mp4`);
 
   try {
     fs.writeFileSync(inputPath, inputBuffer);
-
-    const width = options?.width || 854;
-    const height = options?.height || 480;
-    const videoBitrate = options?.videoBitrate || '500k';
-    const audioBitrate = options?.audioBitrate || '64k';
 
     await execFileAsync(ffmpeg, [
       '-i', inputPath,
@@ -193,7 +203,7 @@ export async function compressMp4(
       return outputBuffer;
     }
 
-    return null; // compression didn't help
+    return null;
   } catch (err) {
     console.warn('[MediaCompress] MP4 compression failed:', (err as Error).message);
     return null;
@@ -203,14 +213,7 @@ export async function compressMp4(
   }
 }
 
-/**
- * Resolve FFmpeg path (async wrapper)
- */
-async function resolveFfmpeg(): Promise<string | null> {
-  if (ffmpegPath) return ffmpegPath;
-  if (await isFfmpegAvailable()) return ffmpegPath;
-  return null;
-}
+// ===== Utilities =====
 
 /**
  * Safely delete a file (ignore errors)
