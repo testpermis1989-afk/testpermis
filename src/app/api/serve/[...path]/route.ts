@@ -112,6 +112,14 @@ export async function GET(
       if (response) return response;
     }
 
+    // 1b. Check if encrypted version exists (q1.png -> q1.png.enc)
+    // encryptFile() creates filePath + '.enc', NOT baseName + '.enc'
+    const encFullPath = fullPath + '.enc';
+    if (fs.existsSync(encFullPath)) {
+      const response = serveFile(encFullPath);
+      if (response) return response;
+    }
+
     // 2. Try alternative extensions (same basename, different ext)
     // .enc is first priority since all encrypted files use this extension
     const dir = path.dirname(fullPath);
