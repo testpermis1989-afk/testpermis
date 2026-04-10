@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
+import { encryptBuffer, isEncryptionEnabled } from '@/lib/file-encryption';
 
-// POST /api/upload/photo - Upload user photo locally
-// Saves the photo as a file in data/photos/ and returns a base64 data URL
+// POST /api/upload/photo - Upload user photo locally (encrypted)
+// Saves encrypted photo in data/photos/ and returns a serve URL
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -36,21 +37,24 @@ export async function POST(request: NextRequest) {
       fs.mkdirSync(photosDir, { recursive: true });
     }
 
-    // Generate unique filename based on CIN or random
+    // Generate unique filename based on CIN
     const safeCin = (cin || 'user').replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
     const ext = file.type === 'image/png' ? '.png' : '.jpg';
     const fileName = `${safeCin}${ext}`;
-    const filePath = path.join(photosDir, fileName);
 
-    // Write file
-    fs.writeFileSync(filePath, buffer);
+    // If encryption is enabled, save as encrypted .enc file
+    // Otherwise save as plain image
+    if (isEncryptionEnabled()) {
+      const encrypted = encryptBuffer(buffer, ext);
+      fs.writeFileSync(path.join(photosDir, fileName + '.enc'), encrypted);
+    } else {
+      fs.writeFileSync(path.join(photosDir, fileName), buffer);
+    }
 
-    // Return the photo as a base64 data URL (stored directly in DB)
-    const base64 = buffer.toString('base64');
-    const mimeType = file.type || 'image/jpeg';
-    const photoDataUrl = `data:${mimeType};base64,${base64}`;
+    // Return a serve URL that will decrypt on-the-fly
+    const photoUrl = `/api/serve/photo/${safeCin}`;
 
-    return NextResponse.json({ photo: photoDataUrl });
+    return NextResponse.json({ photo: photoUrl });
   } catch (error) {
     console.error('Photo upload error:', error);
     return NextResponse.json(
