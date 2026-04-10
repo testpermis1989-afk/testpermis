@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
+import fs from 'fs';
 import { db } from '@/lib/db';
-import { uploadFile, downloadFile, listFiles, getPublicUrl, supabase } from '@/lib/supabase';
 import { compressMp3, compressMp4 } from '@/lib/media-compress';
 
 // Lazy load Jimp - 100% JavaScript, works in Electron without native binaries
@@ -18,7 +18,7 @@ function getJimp() {
   return jimpModule;
 }
 
-// GET /api/admin/compress - Get file stats for a serie from Supabase Storage
+// GET /api/admin/compress - Get file stats for a serie (local filesystem)
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const categoryCode = searchParams.get('category');
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const storagePrefix = `series/${categoryCode}/${serieNumber}`;
+    const dataDir = process.env.LOCAL_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'data');
+    const seriesDir = path.join(dataDir, 'uploads', `series/${categoryCode}/${serieNumber}`);
 
     const stats = {
       images: { count: 0, totalSize: 0 },
@@ -40,17 +41,17 @@ export async function GET(request: NextRequest) {
 
     const subDirs = ['images', 'audio', 'video', 'responses'] as const;
     for (const subDir of subDirs) {
-      const folder = `${storagePrefix}/${subDir}`;
+      const folderPath = path.join(seriesDir, subDir);
       try {
-        const files = await listFiles(folder);
+        if (!fs.existsSync(folderPath)) continue;
+        const files = fs.readdirSync(folderPath);
         for (const file of files) {
+          const filePath = path.join(folderPath, file);
           try {
-            const { data: fileData } = await supabase.storage.from('uploads').list(folder, {
-              search: file,
-            });
-            if (fileData && fileData.length > 0) {
+            const stat = fs.statSync(filePath);
+            if (stat.isFile()) {
               (stats[subDir] as { count: number; totalSize: number }).count++;
-              (stats[subDir] as { count: number; totalSize: number }).totalSize += fileData[0].metadata?.size || 0;
+              (stats[subDir] as { count: number; totalSize: number }).totalSize += stat.size;
             }
           } catch {}
         }
