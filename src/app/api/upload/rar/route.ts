@@ -207,7 +207,7 @@ async function saveQuestions(
         ? `/api/serve/series/${categoryCode}/${serieNumber}/video/q${qNum}.mp4`
         : null,
       responseImageUrl: `/api/serve/series/${categoryCode}/${serieNumber}/responses/r${qNum}.png`,
-      correctAnswers,
+      correctAnswers: correctAns,
     });
   }
 
