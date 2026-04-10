@@ -224,3 +224,27 @@ Stage Summary:
 - Frontend: stores URL `/api/serve/photo/{CIN}` in database, displays via <img src> ✓
 - Old base64 photos in DB still work (data URLs are valid img src)
 - No changes needed - feature was already implemented from previous session
+
+---
+Task ID: 2
+Agent: main
+Task: Add Play/Stop button for video and volume slider for audio on correction screen
+
+Work Log:
+- Read CorrectionScreen component (line 2108) to understand current video/audio rendering
+- Added videoRef and isVideoPlaying state for video control
+- Renamed isPlaying to isAudioPlaying for clarity
+- Added audioVolume state (default 0.8) for volume control
+- Removed autoPlay from correction video, added ref + play/pause/ended event handlers
+- Added Play/Stop button (▶️/⏹) overlay on video (top-left, larger than audio button)
+- Moved audio controls to bottom-left with rounded pill container
+- Added volume range slider (0-100%) with percentage display next to audio button
+- Added stopVideo() calls in handlePrev, handleNext, and question dots navigation
+- Added handleAudioVolumeChange() to update volume in real-time
+- Lint passes, page compiles successfully
+
+Stage Summary:
+- Video: manual Play/Stop button (▶️/⏹) with green circle overlay, top-left position
+- Audio: Play/Stop button + volume slider (0-100%) with percentage display, bottom-left pill
+- Navigation between questions properly stops both video and audio
+- Test screen still uses autoPlay (unchanged - correct behavior for tests)

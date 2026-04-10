@@ -2108,7 +2108,10 @@ const ResultScreen = ({ score, total, onRestart, onHome, onCorrection }: { score
 const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: QuestionData[]; userAnswers: number[][]; onBack: () => void }) => {
   const [currentIdx, setCurrentIdx] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const [audioVolume, setAudioVolume] = useState(0.8);
 
   const question = questions[currentIdx];
   const userAns = userAnswers[currentIdx] || [];
@@ -2117,6 +2120,7 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
   const handlePrev = () => {
     if (currentIdx > 0) {
       stopAudio();
+      stopVideo();
       setCurrentIdx(prev => prev - 1);
     }
   };
@@ -2124,21 +2128,23 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
   const handleNext = () => {
     if (currentIdx < questions.length - 1) {
       stopAudio();
+      stopVideo();
       setCurrentIdx(prev => prev + 1);
     }
   };
 
   const toggleAudio = () => {
     if (!question.audio) return;
-    if (isPlaying && audioRef.current) {
+    if (isAudioPlaying && audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-      setIsPlaying(false);
+      setIsAudioPlaying(false);
     } else {
       audioRef.current = new Audio(question.audio);
-      audioRef.current.onended = () => setIsPlaying(false);
+      audioRef.current.volume = audioVolume;
+      audioRef.current.onended = () => setIsAudioPlaying(false);
       audioRef.current.play().catch(() => {});
-      setIsPlaying(true);
+      setIsAudioPlaying(true);
     }
   };
 
@@ -2148,7 +2154,35 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
       audioRef.current.currentTime = 0;
       audioRef.current = null;
     }
-    setIsPlaying(false);
+    setIsAudioPlaying(false);
+  };
+
+  const handleAudioVolumeChange = (vol: number) => {
+    setAudioVolume(vol);
+    if (audioRef.current) {
+      audioRef.current.volume = vol;
+    }
+  };
+
+  const toggleVideo = () => {
+    if (!videoRef.current) return;
+    if (isVideoPlaying) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      setIsVideoPlaying(false);
+    } else {
+      videoRef.current.play().catch(() => {});
+      setIsVideoPlaying(true);
+    }
+  };
+
+  const stopVideo = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      videoRef.current = null;
+    }
+    setIsVideoPlaying(false);
   };
 
   // Question is correct?
@@ -2179,11 +2213,14 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
           {question.video ? (
             <video
               key={question.video}
+              ref={videoRef}
               src={question.video}
-              autoPlay
               muted
               loop
               playsInline
+              onEnded={() => setIsVideoPlaying(false)}
+              onPlay={() => setIsVideoPlaying(true)}
+              onPause={() => setIsVideoPlaying(false)}
               className="w-full h-full object-contain"
             />
           ) : question.image && (
@@ -2195,15 +2232,44 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
               unoptimized
             />
           )}
-          {/* Audio button - top left */}
-          {question.audio && (
+          {/* Video play/stop button - top left */}
+          {question.video && (
             <button
-              onClick={toggleAudio}
+              onClick={toggleVideo}
               className="absolute rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center text-white transition-colors"
-              style={{ top: '4%', left: '4%', width: 'clamp(28px, 3.5vw, 44px)', height: 'clamp(28px, 3.5vw, 44px)', fontSize: 'clamp(14px, 1.8vw, 22px)' }}
+              style={{ top: '4%', left: '4%', width: 'clamp(36px, 4.5vw, 56px)', height: 'clamp(36px, 4.5vw, 56px)', fontSize: 'clamp(16px, 2vw, 26px)' }}
             >
-              {isPlaying ? '⏹' : '🔊'}
+              {isVideoPlaying ? '⏹' : '▶️'}
             </button>
+          )}
+
+          {/* Audio controls - bottom left with volume slider */}
+          {question.audio && (
+            <div
+              className="absolute flex items-center gap-2 bg-black/60 hover:bg-black/80 rounded-full px-3 py-1.5 transition-colors"
+              style={{ bottom: '4%', left: '4%' }}
+            >
+              <button
+                onClick={toggleAudio}
+                className="flex items-center justify-center text-white"
+                style={{ fontSize: 'clamp(14px, 1.8vw, 22px)' }}
+              >
+                {isAudioPlaying ? '⏹' : '🔊'}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={audioVolume}
+                onChange={(e) => handleAudioVolumeChange(parseFloat(e.target.value))}
+                className="w-[clamp(60px, 8vw, 120px)] accent-blue-500 cursor-pointer"
+                title={`Volume: ${Math.round(audioVolume * 100)}%`}
+              />
+              <span className="text-white text-xs min-w-[28px] text-right font-mono" style={{ fontSize: 'clamp(8px, 0.9vw, 12px)' }}>
+                {Math.round(audioVolume * 100)}%
+              </span>
+            </div>
           )}
         </div>
 
@@ -2285,7 +2351,7 @@ const CorrectionScreen = ({ questions, userAnswers, onBack }: { questions: Quest
             return (
               <button
                 key={idx}
-                onClick={() => { stopAudio(); setCurrentIdx(idx); }}
+                onClick={() => { stopAudio(); stopVideo(); setCurrentIdx(idx); }}
                 className={`rounded-full flex items-center justify-center font-bold shrink-0 transition-all ${
                   idx === currentIdx
                     ? correct
