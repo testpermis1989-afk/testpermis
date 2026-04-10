@@ -202,3 +202,25 @@ Stage Summary:
 - Fixed: Series import now works - all missing routes created
 - File encryption re-enabled: files encrypted on disk, transparently served decrypted via app
 - Server compiles and responds correctly to upload requests
+
+---
+Task ID: 1
+Agent: main
+Task: Verify and confirm user photo encryption/decryption is working
+
+Work Log:
+- Read `/api/upload/photo/route.ts` - already encrypts photos on disk with PMENC header
+- Read `/api/serve/photo/[cin]/route.ts` - already decrypts .enc files transparently  
+- Read frontend code - already stores serve URL (not base64) in user.photo
+- Verified login response returns photo URL correctly
+- Tested upload: curl POST returned `{"photo":"/api/serve/photo/TEST123"}` with HTTP 200
+- Verified encrypted file `TEST123.jpg.enc` (223 bytes) starts with PMENC magic header
+- Verified user update endpoints handle photo field correctly
+
+Stage Summary:
+- Photo encryption/decryption is FULLY IMPLEMENTED and working
+- Upload: encrypts to `data/photos/{CIN}.jpg.enc` with PMENC header ✓
+- Serve: `/api/serve/photo/{CIN}` decrypts transparently ✓
+- Frontend: stores URL `/api/serve/photo/{CIN}` in database, displays via <img src> ✓
+- Old base64 photos in DB still work (data URLs are valid img src)
+- No changes needed - feature was already implemented from previous session
