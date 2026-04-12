@@ -248,3 +248,25 @@ Stage Summary:
 - Audio: Play/Stop button + volume slider (0-100%) with percentage display, bottom-left pill
 - Navigation between questions properly stops both video and audio
 - Test screen still uses autoPlay (unchanged - correct behavior for tests)
+
+---
+Task ID: 3
+Agent: main
+Task: Create marketing presentation for auto-ecoles
+
+Work Log:
+- Analyzed app features: login, categories, series, melange, test, results, correction, admin, security
+- Generated 6 marketing AI images (hero, features, admin, security, benefits, contact)
+- Created 10 HTML slides with dark navy theme (#0B1622) + Moroccan red (#C1272D) + cyan (#37DCF2)
+- Slides: Cover, Problème, Fonctionnalités (8 cards), Comment ça marche (4 steps), Examen interactif, Panneau admin, Sécurité AES-256, Avantages, Tarifs (3 packs), Contact CTA
+- Fixed overflow issues on slides 2 and 3
+- Built PPTX using html2pptx workflow, all 10 slides passed validation
+- Generated thumbnail grid for visual QA
+- Pushed to GitHub
+
+Stage Summary:
+- Created professional 10-slide PPTX presentation (993 KB)
+- File: Permis-Maroc-Presentation-Auto-Ecoles.pptx
+- All slides validated (no overflow, no errors)
+- Design: Dark modern theme with Moroccan-inspired colors
+- Includes: pricing tiers (500/1000/2000 DH), contact placeholders

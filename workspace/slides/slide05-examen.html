@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html { background: #0B1622; }
+body {
+  width: 720pt; height: 405pt; margin: 0; padding: 0;
+  font-family: Arial, sans-serif;
+  display: flex; flex-direction: column;
+  background: #0B1622;
+}
+.header {
+  padding: 28pt 50pt 16pt 50pt;
+}
+.accent-line {
+  background: #C1272D;
+  width: 40pt; height: 3pt;
+  margin-bottom: 12pt;
+}
+.main {
+  display: flex; flex: 1; padding: 0 50pt 28pt 50pt; gap: 24pt;
+}
+.col-left { width: 55%; display: flex; flex-direction: column; justify-content: center; }
+.col-right { width: 45%; display: flex; align-items: center; justify-content: center; }
+.feature-item {
+  display: flex; align-items: flex-start; gap: 12pt;
+  margin-bottom: 14pt;
+}
+.feature-dot {
+  background: #37DCF2;
+  width: 8pt; height: 8pt; border-radius: 50%;
+  margin-top: 4pt; flex-shrink: 0;
+}
+.img-container {
+  border-radius: 10pt; overflow: hidden;
+  border: 1pt solid rgba(55,220,242,0.2);
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="accent-line"></div>
+  <h1 style="color: #FFFFFF; font-size: 26pt; margin: 0 0 4pt 0;">EXAMEN INTERACTIF</h1>
+  <p style="color: rgba(255,255,255,0.6); font-size: 11pt; margin: 0;">Questions multim&#233;dias avanc&#233;es</p>
+</div>
+<div class="main">
+  <div class="col-left">
+    <div class="feature-item">
+      <div class="feature-dot"></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 12pt; font-weight: bold; margin: 0 0 3pt 0;">Images Haute Qualit&#233;</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Panneaux de signalisation et situations de conduite</p>
+      </div>
+    </div>
+    <div class="feature-item">
+      <div class="feature-dot"></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 12pt; font-weight: bold; margin: 0 0 3pt 0;">Questions Audio</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">&#201;coutez et r&#233;pondez avec contr&#244;le du volume</p>
+      </div>
+    </div>
+    <div class="feature-item">
+      <div class="feature-dot"></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 12pt; font-weight: bold; margin: 0 0 3pt 0;">Vid&#233;os Int&#233;gr&#233;es</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Situations de conduite en vid&#233;o avec play/stop</p>
+      </div>
+    </div>
+    <div class="feature-item">
+      <div class="feature-dot"></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 12pt; font-weight: bold; margin: 0 0 3pt 0;">Chronom&#232;tre Intelligent</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Compte &#224; rebours avec gestion automatique du temps</p>
+      </div>
+    </div>
+    <div class="feature-item">
+      <div class="feature-dot"></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 12pt; font-weight: bold; margin: 0 0 3pt 0;">Correction D&#233;taill&#233;e</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Revue compl&#232;te avec r&#233;ponses correctes mises en &#233;vidence</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-right">
+    <div class="img-container">
+      <img src="../images/features.png" style="width: 260pt; height: 150pt;" />
+    </div>
+  </div>
+</div>
+</body>
+</html>

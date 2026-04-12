@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html { background: #0B1622; }
+body {
+  width: 720pt; height: 405pt; margin: 0; padding: 0;
+  font-family: Arial, sans-serif;
+  display: flex; flex-direction: column;
+  background: #0B1622;
+}
+.header {
+  padding: 28pt 50pt 16pt 50pt;
+}
+.accent-line {
+  background: #C1272D;
+  width: 40pt; height: 3pt;
+  margin-bottom: 12pt;
+}
+.main {
+  display: flex; flex: 1; padding: 0 50pt 28pt 50pt; gap: 24pt;
+}
+.col-left { width: 45%; display: flex; align-items: center; justify-content: center; }
+.col-right { width: 55%; display: flex; flex-direction: column; justify-content: center; }
+.img-container {
+  border-radius: 10pt; overflow: hidden;
+  border: 1pt solid rgba(55,220,242,0.2);
+}
+.admin-item {
+  display: flex; align-items: flex-start; gap: 10pt;
+  margin-bottom: 12pt;
+}
+.admin-num {
+  background: rgba(193,39,45,0.15);
+  border: 1pt solid rgba(193,39,45,0.3);
+  border-radius: 6pt;
+  width: 24pt; height: 24pt;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="accent-line"></div>
+  <h1 style="color: #FFFFFF; font-size: 26pt; margin: 0 0 4pt 0;">PANNEAU ADMINISTRATEUR</h1>
+  <p style="color: rgba(255,255,255,0.6); font-size: 11pt; margin: 0;">G&#233;rez votre auto-&#233;cole efficacement</p>
+</div>
+<div class="main">
+  <div class="col-left">
+    <div class="img-container">
+      <img src="../images/admin.png" style="width: 250pt; height: 190pt;" />
+    </div>
+  </div>
+  <div class="col-right">
+    <div class="admin-item">
+      <div class="admin-num"><p style="color: #C1272D; font-size: 10pt; font-weight: bold; margin: 0;">1</p></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 11pt; font-weight: bold; margin: 0 0 2pt 0;">Import de S&#233;ries</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Glissez-d&#233;posez vos fichiers ZIP de questions</p>
+      </div>
+    </div>
+    <div class="admin-item">
+      <div class="admin-num"><p style="color: #C1272D; font-size: 10pt; font-weight: bold; margin: 0;">2</p></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 11pt; font-weight: bold; margin: 0 0 2pt 0;">Compression Automatique</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Images, audio et vid&#233;o compress&#233;s automatiquement</p>
+      </div>
+    </div>
+    <div class="admin-item">
+      <div class="admin-num"><p style="color: #C1272D; font-size: 10pt; font-weight: bold; margin: 0;">3</p></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 11pt; font-weight: bold; margin: 0 0 2pt 0;">Gestion Utilisateurs</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Cr&#233;ez et g&#233;rez les comptes de vos candidats</p>
+      </div>
+    </div>
+    <div class="admin-item">
+      <div class="admin-num"><p style="color: #C1272D; font-size: 10pt; font-weight: bold; margin: 0;">4</p></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 11pt; font-weight: bold; margin: 0 0 2pt 0;">Gestion des S&#233;ries</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">Visualisez, modifiez et supprimez vos s&#233;ries</p>
+      </div>
+    </div>
+    <div class="admin-item">
+      <div class="admin-num"><p style="color: #C1272D; font-size: 10pt; font-weight: bold; margin: 0;">5</p></div>
+      <div>
+        <p style="color: #FFFFFF; font-size: 11pt; font-weight: bold; margin: 0 0 2pt 0;">R&#233;paration de Fichiers</p>
+        <p style="color: rgba(255,255,255,0.5); font-size: 9pt; margin: 0;">D&#233;tectez et r&#233;parez les fichiers corrompus automatiquement</p>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
