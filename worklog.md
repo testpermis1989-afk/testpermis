@@ -270,3 +270,24 @@ Stage Summary:
 - All slides validated (no overflow, no errors)
 - Design: Dark modern theme with Moroccan-inspired colors
 - Includes: pricing tiers (500/1000/2000 DH), contact placeholders
+
+---
+Task ID: 4
+Agent: main
+Task: Generate promotional videos for Permis Maroc app
+
+Work Log:
+- Created 3 text-to-video generation scripts using z-ai-web-dev-sdk
+- Video 1 (Intro): Cinematic promo with laptop, driving test app, Moroccan road signs
+- Video 2 (Exam): Close-up of tablet with multiple choice question and timer
+- Video 3 (Security): Shield lock icon with digital encryption patterns
+- All 3 videos: 1344x768, H.264, 5 seconds each
+- Started generation in background, handled rate limiting with cooldown delays
+- All videos generated successfully and validated
+
+Stage Summary:
+- 3 MP4 videos created in workspace/videos/
+- video-intro.mp4 (1.3 MB) - App introduction/promo
+- video-exam.mp4 (1.9 MB) - Exam screen showcase
+- video-security.mp4 (1.4 MB) - Security features
+- Served via HTTP at port 8888 for download
